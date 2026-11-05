@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kier vault</title>
+<style>
+  :root { --bg: #fbfbfa; --text: #1c1c1e; --muted: #6e6e73; --faint: #a1a1a6; --line: rgba(0,0,0,.08); --accent: #0a66c2; --warn: #b42318; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161618; --text: #f2f2f4; --muted: #a1a1a6; --faint: #6e6e73; --line: rgba(255,255,255,.1); --accent: #5aa9ff; --warn: #ff8a80; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 80px; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0 auto 0 0; }
+  a { color: var(--accent); text-decoration: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 4px 8px; cursor: pointer; border-radius: 6px; }
+  button:hover { background: var(--line); }
+  button.forget { font-size: 13px; color: var(--muted); }
+  button.forget:hover { color: var(--warn); }
+  .lede { color: var(--muted); margin: 0 0 28px; }
+  h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 32px 0 6px; }
+  .source { padding: 14px 0; border-top: 1px solid var(--line); }
+  .source:first-of-type { border-top: 0; }
+  .source .head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .source .name { font-weight: 600; }
+  .source .count { color: var(--muted); font-size: 13px; margin-right: auto; }
+  .source .keeps { color: var(--muted); font-size: 13px; margin: 2px 0 0; }
+  .threads { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+  .thread { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px; padding: 0 0 0 10px; }
+  .thread span { color: var(--faint); margin-left: 4px; }
+  ul.never { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
+  ul.never li { margin: 2px 0; }
+  input[type=search] { font: inherit; color: inherit; background: var(--line); border: 0; border-radius: 8px; padding: 6px 12px; width: 100%; outline: none; }
+  .row { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .row .what { flex: 1; min-width: 0; }
+  .row .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { font-size: 13px; color: var(--muted); }
+  .empty { color: var(--muted); padding: 8px 0; }
+  .time { color: var(--faint); font: 13px/1.6 ui-monospace, "SF Mono", monospace; white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Vault</h1>
+    <a href="/">Timeline</a>
+    <a href="/setup">Setup</a>
+  </header>
+  <p class="lede" id="lede"></p>
+
+  <h2>What Kier keeps</h2>
+  <section id="sources"></section>
+
+  <h2>Never kept</h2>
+  <ul class="never">
+    <li>Passwords, codes and card numbers, scrubbed before anything is saved, and anything a password manager copies.</li>
+    <li>Banking, password and health apps, not even their notifications.</li>
+    <li>Adult sites, searches, downloads and copies.</li>
+    <li>Private and incognito windows.</li>
+    <li>What you type in text fields. Kier never logs keystrokes.</li>
+    <li id="forgotten">Things you forget here.</li>
+  </ul>
+
+  <h2>Forget one thing</h2>
+  <input type="search" id="q" placeholder="Find a message, page, copy or file">
+  <section id="found"></section>
+
+  <h2>Who read your vault</h2>
+  <section id="reads"></section>
+</main>
+<script type="module">
+import { browserAPI } from '/api.mjs'
+const fetch = await browserAPI({ location, history, sessionStorage, fetch: window.fetch.bind(window) })
+const $ = (s) => document.querySelector(s)
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+const NAMES = { whatsapp: 'WhatsApp', imessage: 'iMessage', calls: 'Calls', calendar: 'Calendar', browser: 'Web', downloads: 'Downloads', mail: 'Email', notifications: 'Notifications', clipboard: 'Copied', apps: 'Apps', screen: 'On screen' }
+// What each source keeps, in the owner's words. What it never keeps is listed once, under "Never kept".
+const KEEPS = {
+  whatsapp: 'Every message, read from WhatsApp on this Mac.',
+  imessage: 'Every message, read from Messages on this Mac.',
+  calls: 'Who called whom and for how long. Never what was said.',
+  calendar: 'Events from every calendar this Mac syncs.',
+  notifications: 'What apps show in Notification Center, before you dismiss it.',
+  browser: 'Pages you open and what you search for.',
+  downloads: 'File names and sizes. Never what is inside.',
+  clipboard: 'What you copy.',
+  apps: 'Which app you use, and for how long.',
+  screen: 'Conversation text in chat apps while they are in front.',
+  mail: 'Email.',
+}
+const day = (ts) => new Date(ts * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+const when = (ts) => `${day(ts)}, ${new Date(ts * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`
+const mb = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`)
+const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
+
+async function load() {
+  const v = await (await fetch('/api/vault')).json()
+  const total = v.sources.reduce((n, s) => n + s.n, 0)
+  const oldest = Math.min(...v.sources.map((s) => s.oldest))
+  $('#lede').textContent = `${total.toLocaleString()} memories since ${day(oldest)}, ${mb(v.bytes)}, all on this Mac. Nothing leaves it unless you ask an AI to read it, and every read is listed below.`
+  $('#sources').innerHTML = v.sources.map((s) => `<div class="source"><div class="head">
+      <span class="name">${NAMES[s.source] || esc(s.source)}</span>
+      <span class="count">${s.n.toLocaleString()} kept, ${s.recent.toLocaleString()} in the last 30 days, newest ${when(s.newest)}</span></div>
+    <p class="keeps">${KEEPS[s.source] || ''}</p>
+    <div class="threads">${(v.threads[s.source] || []).map((t) => `<span class="thread">${esc(t.thread)}<span>${t.n}</span>
+      <button class="forget" data-source="${esc(s.source)}" data-thread="${esc(t.thread)}" title="Forget ${esc(t.thread)} and stop keeping it">×</button></span>`).join('')}</div></div>`).join('')
+  $('#forgotten').textContent = v.forgotten ? `Things you forgot here: ${v.forgotten}. Kier keeps only a one-way fingerprint of each, so even this page can't say what they were.` : 'Things you forget here. Kier keeps only a one-way fingerprint, so even this page can\'t say what they were.'
+  $('#reads').innerHTML = v.reads.recent.length
+    ? `<div class="empty">${v.reads.week} reads in the last 7 days.</div>` + v.reads.recent.map((r) => `<div class="row"><span class="time">${when(r.ts)}</span><div class="what">
+        <div>${esc(r.client || 'An AI')} used ${esc(r.tool)}</div><div class="meta">${esc(r.args || '')}, ${r.rows ?? 0} items</div></div></div>`).join('')
+    : '<div class="empty">No AI has read your vault yet.</div>'
+}
+
+let timer
+$('#q').oninput = () => {
+  clearTimeout(timer)
+  timer = setTimeout(async () => {
+    const q = $('#q').value.trim()
+    if (q.length < 2) return ($('#found').innerHTML = '')
+    const { items } = await (await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json()
+    $('#found').innerHTML = items.length ? items.slice(0, 50).map((i) => `<div class="row"><span class="time">${day(i.ts)}</span><div class="what">
+        <div class="text">${esc(i.text)}</div><div class="meta">${esc(i.thread || '')}, ${NAMES[i.source] || esc(i.source)}</div></div>
+        <button class="forget" data-id="${esc(i.id)}">Forget</button></div>`).join('') : '<div class="empty">Nothing found.</div>'
+  }, 250)
+}
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button.forget')
+  if (!b) return
+  const { id, source, thread } = b.dataset
+  if (!confirm(id ? 'Forget this? It is deleted now.' : `Forget everything from ${thread}? It is deleted now, and Kier stops keeping it from now on.`)) return
+  if (id) {
+    await post('/api/forget', { id })
+    b.closest('.row').remove()
+  } else {
+    await post('/api/forget', { source, thread })
+  }
+  load()
+})
+load()
+</script>
+</body>
+</html>

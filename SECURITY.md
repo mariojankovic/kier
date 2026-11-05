@@ -1,0 +1,17 @@
+# Security
+
+Report vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/mariojankovic/kier/security/advisories/new). Include the affected version, steps to reproduce, and the impact. Use invented data in examples and remove tokens, API keys and personal messages from attachments.
+
+Please do not put vulnerability details in a public issue. Reports are reviewed for the latest release.
+
+Managed inference uses Unix sockets in the owner's private data directory. Kier checks directory and socket ownership and permissions before connecting; tokens and bounded requests add defense in depth. Other model endpoints require an explicit selection in Setup. Browser API access uses exact-origin header tokens and one-time bootstrap tickets; bearer cookies are not accepted. Child processes use controlled environments and resolved executable paths, and Python inference runs isolated.
+
+Online page helpers validate public addresses at connection time on every HTTPS redirect. Restricted MCP reads filter nested evidence before retrieval and omit cached cross-source summaries without provenance. The read-only MCP role exposes only vault read tools and refuses writes. Codex Ask remains unavailable until a tools-only boundary can be verified; Claude remains available. Phone sync never adopts containers by title; legacy containers are preserved and deletion requires recorded item ownership.
+
+Native HTTP clients use the owner's persistent `token` file (0600 inside the 0700 data directory) as an HMAC-SHA256 key, never as a bearer credential. Protocol v1 signs UTF-8 fields separated by newlines: uppercase method, raw encoded path plus query, integer Unix timestamp, 128-bit lowercase hex nonce, and lowercase SHA-256 of the wire body. Headers are `x-kier-time`, `x-kier-nonce`, and `x-kier-signature`. The daemon accepts at most 60 seconds of clock skew and persists accepted nonces through their full acceptance window, including across restarts. Invalid replay state fails closed.
+
+Each signed response has `x-kier-response`: HMAC-SHA256 of request nonce, decimal HTTP status, and lowercase SHA-256 of the response body, separated by newlines. Native clients verify the complete body before use, including errors and NDJSON chat output. This buffers chat output until completion. Redirects, cookies and proxy configuration are disabled for native daemon traffic. Request bodies are AES-256-GCM sealed using the key HMAC-SHA256(secret, `kier-request-body-v1`), encoded as 12-byte nonce, ciphertext, and 16-byte tag, then signed. This also keeps captured text private if another account replaces the TCP listener between requests.
+
+This source uses a SwiftUI native window, with no WKWebView credential injection. The CLI web launcher verifies a fresh signed status response and signed one-use bootstrap ticket before opening a page. Browser session credentials are HMAC-derived per daemon launch, exact-origin bound, expire after ten minutes, and cannot mint new tickets; reopen the page through Kier to reconnect. MCP uses owner-local database access and does not send HTTP credentials.
+
+The daemon binds its listener before starting maintenance, collectors or model workers. Managed model, embedding, decision and speech processes run behind a separate guard with a private lifetime pipe. On daemon exit, including SIGKILL, the guard terminates the worker process group and escalates to SIGKILL after one second. No exit hook in a model runtime is needed.

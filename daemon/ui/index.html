@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kier</title>
+<style>
+  :root { --bg: #fbfbfa; --text: #1c1c1e; --muted: #6e6e73; --faint: #a1a1a6; --line: rgba(0,0,0,.08); --accent: #0a66c2; --task: #b4530a; --done: #2f7d32; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161618; --text: #f2f2f4; --muted: #a1a1a6; --faint: #6e6e73; --line: rgba(255,255,255,.1); --accent: #5aa9ff; --task: #f0a35e; --done: #7bc47f; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 80px; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0 auto 0 0; }
+  nav { display: flex; align-items: center; gap: 4px; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 4px 8px; cursor: pointer; border-radius: 6px; }
+  button:hover { background: var(--line); }
+  #day { font-weight: 600; min-width: 112px; text-align: center; }
+  input[type=search] { font: inherit; color: inherit; background: var(--line); border: 0; border-radius: 8px; padding: 6px 12px; width: 220px; outline: none; }
+  h2 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 28px 0 6px; }
+  .row { display: grid; grid-template-columns: 48px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .time { color: var(--faint); font: 13px/1.6 ui-monospace, "SF Mono", monospace; }
+  .meta { font-size: 13px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  .meta b { font-weight: 600; color: var(--text); }
+  .text { margin-top: 2px; white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .text.open { -webkit-line-clamp: unset; }
+  .src { font-size: 12px; color: var(--faint); }
+  .row .forget { font-size: 12px; color: var(--faint); padding: 0 6px; margin-left: auto; opacity: 0; }
+  .row:hover .forget { opacity: 1; }
+  @media (hover: none) { .row .forget { opacity: 1; } }
+  .tag { color: var(--task); font-weight: 600; }
+  .task { padding: 10px 0; border-top: 1px solid var(--line); display: flex; gap: 12px; align-items: baseline; }
+  .task:first-of-type { border-top: 0; }
+  .task .what { flex: 1; }
+  .task .actions { display: flex; gap: 2px; font-size: 13px; color: var(--muted); flex-wrap: wrap; justify-content: flex-end; }
+  .task .actions .main { color: var(--accent); font-weight: 500; }
+  .task .kind { font-size: 12px; color: var(--faint); letter-spacing: .02em; }
+  .task .line { margin: 1px 0 2px; }
+  .task .amount { font-weight: 600; white-space: nowrap; }
+  a.main { padding: 4px 8px; border-radius: 6px; }
+  a.main:hover { background: var(--line); }
+  .handled { color: var(--done); }
+  a { color: var(--accent); text-decoration: none; }
+  .filters { display: flex; gap: 2px; margin: 32px 0 4px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .filters button.on { color: var(--text); background: var(--line); }
+  .empty { color: var(--muted); padding: 12px 0; }
+  details.maybe { margin-top: 28px; }
+  details.maybe summary { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; cursor: pointer; list-style: none; }
+  details.maybe summary::-webkit-details-marker { display: none; }
+  details.maybe summary::after { content: ' ›'; }
+  details.maybe[open] summary::after { content: ' ⌄'; }
+  footer { margin-top: 48px; font-size: 12px; color: var(--faint); }
+  @media (max-width: 560px) { input[type=search] { width: 100%; } .row { grid-template-columns: 40px 1fr; } }
+  @media (max-width: 700px) { .task { flex-direction: column; gap: 4px; } .task .actions { justify-content: flex-start; margin-left: -8px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Kier</h1>
+    <nav>
+      <button id="prev" aria-label="Previous day">‹</button>
+      <button id="day"></button>
+      <button id="next" aria-label="Next day">›</button>
+    </nav>
+    <input type="search" id="q" placeholder="Search everything">
+    <button id="speak" title="Read today's brief out loud">Read it to me</button>
+    <a href="/vault">Vault</a>
+  </header>
+  <p id="setup" class="empty" hidden></p>
+  <section id="brief"></section>
+  <div class="filters" id="filters"></div>
+  <section id="timeline"></section>
+  <footer id="status"></footer>
+</main>
+<script type="module">
+import { browserAPI } from '/api.mjs'
+const fetch = await browserAPI({ location, history, sessionStorage, fetch: window.fetch.bind(window) })
+import { safeLink } from "/links.mjs"
+const $ = (s) => document.querySelector(s)
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+const NAMES = { whatsapp: 'WhatsApp', imessage: 'iMessage', calls: 'Call', calendar: 'Calendar', browser: 'Web', downloads: 'Download', mail: 'Email', notifications: 'Notification', clipboard: 'Copied', apps: 'App', screen: 'On screen' }
+const FILTERS = { all: null, messages: ['whatsapp', 'imessage', 'mail', 'notifications', 'screen'], calls: ['calls'], calendar: ['calendar'], web: ['browser', 'apps'], files: ['downloads', 'clipboard'] }
+const local = (iso) => new Date(`${iso}T12:00:00`)
+const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const todayIso = () => isoOf(new Date())
+const label = (iso) => iso === todayIso() ? 'Today' : local(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+const time = (ts) => new Date(ts * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+let date = new URLSearchParams(location.search).get('date') || todayIso()
+let filter = 'all'
+let items = []
+
+function itemRow(i, withDay) {
+  const who = i.from_me ? 'You' : i.sender
+  const task = i.is_task ? `<span class="tag">Task${i.due ? `, ${esc(label(i.due))}` : ''}${i.amount ? `, ${esc(i.amount)}` : ''}</span>` : ''
+  const href = safeLink(i.url)
+  const link = href ? ` <a href="${esc(href)}">open</a>` : ''
+  return `<div class="row"><div class="time">${withDay ? esc(new Date(i.ts * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })) + '<br>' : ''}${time(i.ts)}</div><div>
+    <div class="meta"><b>${esc(i.thread || '')}</b>${who && who !== i.thread ? `<span>${esc(who)}</span>` : ''}<span class="src">${esc(NAMES[i.source] || i.source)}</span>${task}${link}<button class="forget" data-forget="${esc(i.id)}">Forget</button></div>
+    <div class="text">${esc(i.text)}</div></div></div>`
+}
+
+// Each kind of task gets the layout and the one action that fits it; the local models pick the kind.
+const CARDS = {
+  payment: { label: 'Payment', main: { mark: 'done', text: 'Paid' } },
+  appointment: { label: 'Appointment', main: { calendar: true, text: 'Add to calendar' } },
+  reply: { label: 'Reply needed', main: { reply: true, text: 'Reply' } },
+  promise: { label: 'You promised', main: { mark: 'done', text: 'Done' } },
+  todo: { label: 'To do', main: { mark: 'done', text: 'Done' } },
+}
+
+function taskRow(t, note) {
+  const who = t.from_me ? 'you' : t.sender
+  const card = CARDS[t.card] || CARDS.todo
+  const pending = t.state === 'looks_done'
+  const m = pending ? { mark: 'done', text: 'Confirm' } : card.main
+  const href = safeLink(t.url)
+  const main = m.reply ? (href ? `<a class="main" href="${esc(href)}">${m.text}</a>` : '')
+    : m.calendar ? `<button class="main" data-cal="1">${m.text}</button>` : `<button class="main" data-mark="${m.mark}">${m.text}</button>`
+  const rest = [
+    m.mark !== 'done' ? '<button data-mark="done">Done</button>' : '',
+    t.card !== 'appointment' ? '<button data-mark="snoozed">Tomorrow</button>' : '',
+    t.card !== 'promise' ? '<button data-mark="dismissed">Not mine</button>' : '',
+  ].join('')
+  return `<div class="task card-${esc(t.card || 'todo')}" data-id="${esc(t.id)}"><div class="what">
+    <div class="kind">${pending ? 'Looks done' : card.label}${t.due ? `, ${esc(label(t.due))}` : ''}</div>
+    <div class="line">${esc(t.summary || t.text)}${t.amount ? ` <span class="amount">${esc(t.amount)}</span>` : ''}</div>
+    <div class="meta"><span>${esc(who)}, ${esc(NAMES[t.source] || t.source)}</span>${note ? `<span>${esc(note)}</span>` : ''}</div>
+    ${pending && t.reason ? `<div class="meta">${esc(t.reason)}</div>` : ''}</div>
+    <div class="actions">${main}${rest}</div></div>`
+}
+
+const eventRow = (e, withDay) => `<div class="task"><div class="what">${esc(e.text)}<div class="meta"><span>${withDay ? esc(label(e.day)) + ', ' : ''}${e.allDay ? 'all day' : time(e.ts)}</span><span class="src">Calendar</span></div></div></div>`
+
+async function loadBrief() {
+  if (date !== todayIso()) return ($('#brief').innerHTML = '')
+  const b = await (await fetch('/api/brief')).json()
+  const part = (title, html) => (html ? `<h2>${title}</h2>${html}` : '')
+  const more = (n) => (n ? `<div class="empty">and ${n} more, filter the timeline by Messages to see them</div>` : '')
+  $('#brief').innerHTML =
+    part('Today', b.today.events.map((e) => eventRow(e)).join('') + b.today.tasks.map((t) => taskRow(t)).join('')) +
+    part('Maybe forgotten', b.forgotten.map((t) => taskRow(t)).join('') + more(b.more.forgotten)) +
+    part('Still open', b.open.map((t) => taskRow(t, label(isoOf(new Date(t.ts * 1000))))).join('') + more(b.more.open)) +
+    part('Coming up', b.soon.events.map((e) => eventRow(e, true)).join('') + b.soon.tasks.map((t) => taskRow(t, label(t.due))).join('')) +
+    // Tasks the second opinion doubts: out of the way, one click to see.
+    (b.maybe.length ? `<details class="maybe"><summary>Maybe yours (${b.maybe.length + (b.more.maybe || 0)})</summary>${b.maybe.map((t) => taskRow(t, label(isoOf(new Date(t.ts * 1000))))).join('')}</details>` : '') ||
+    '<h2>Today</h2><div class="empty">Nothing waiting on you.</div>'
+}
+
+function renderFilters() {
+  $('#filters').innerHTML = Object.keys(FILTERS).map((f) => `<button class="${f === filter ? 'on' : ''}" data-filter="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')
+}
+
+function renderTimeline(withDay = false) {
+  const shown = FILTERS[filter] ? items.filter((i) => FILTERS[filter].includes(i.source)) : items
+  $('#timeline').innerHTML = shown.length ? shown.map((i) => itemRow(i, withDay)).join('') : '<div class="empty">Nothing here.</div>'
+}
+
+async function loadDay() {
+  $('#day').textContent = label(date)
+  history.replaceState(null, '', date === todayIso() ? '/' : `/?date=${date}`)
+  const [day] = await Promise.all([fetch(`/api/day?date=${date}`).then((r) => r.json()), loadBrief()])
+  // Newest first reads like a feed; the day still reads top to bottom within an hour.
+  items = day.items.reverse()
+  renderFilters()
+  renderTimeline()
+}
+
+async function loadSetup() {
+  const { steps } = await (await fetch('/api/setup')).json()
+  const left = steps.filter((s) => s.status === 'todo' && s.action)
+  $('#setup').hidden = !left.length
+  if (left.length) $('#setup').innerHTML = `<a href="/setup">Finish setting up Kier</a>: ${esc(left.map((s) => s.title).join(', '))}`
+}
+
+async function loadStatus() {
+  const s = await (await fetch('/api/status')).json()
+  const bad = s.runs.filter((r) => !r.ok).map((r) => `${NAMES[r.source] || r.source}: ${r.error}`)
+  const total = s.counts.reduce((n, c) => n + c.n, 0)
+  $('#status').textContent = `${total.toLocaleString()} memories. ${s.untagged ? `${s.untagged} messages waiting for the tagger. ` : ''}${bad.join('. ')}`
+}
+
+const shift = (n) => { const d = local(date); d.setDate(d.getDate() + n); date = isoOf(d); $('#q').value = ''; loadDay() }
+$('#prev').onclick = () => shift(-1)
+$('#next').onclick = () => shift(1)
+$('#day').onclick = () => { date = todayIso(); $('#q').value = ''; loadDay() }
+let timer
+$('#q').oninput = () => {
+  clearTimeout(timer)
+  timer = setTimeout(async () => {
+    const q = $('#q').value.trim()
+    if (q.length < 2) return loadDay()
+    $('#brief').innerHTML = ''
+    items = (await (await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json()).items
+    renderFilters()
+    renderTimeline(true)
+  }, 250)
+}
+document.addEventListener('click', async (e) => {
+  if (e.target.matches('.text')) return e.target.classList.toggle('open')
+  if (e.target.dataset.filter) { filter = e.target.dataset.filter; renderFilters(); return renderTimeline(!!$('#q').value.trim()) }
+  if (e.target.id === 'speak') return fetch('/api/speak', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+  if (e.target.dataset.forget) {
+    if (!confirm('Forget this? It is deleted now.')) return
+    await fetch('/api/forget', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: e.target.dataset.forget }) })
+    return e.target.closest('.row').remove()
+  }
+  const row = e.target.closest('[data-id]')
+  if (e.target.dataset.cal) {
+    await fetch('/api/calendar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: row.dataset.id }) })
+    e.target.textContent = 'Sent to Calendar'
+    return
+  }
+  const mark = e.target.dataset.mark
+  if (!mark) return
+  await fetch('/api/mark', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: row.dataset.id, status: mark }) })
+  row.remove()
+})
+loadDay()
+loadStatus()
+loadSetup()
+</script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Kier</string>
+	<key>CFBundleExecutable</key>
+	<string>Kier</string>
+	<key>CFBundleIconFile</key>
+	<string>Kier</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.getkier.kier</string>
+	<key>CFBundleName</key>
+	<string>Kier</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.7.4</string>
+	<key>CFBundleVersion</key>
+	<string>96</string>
+	<key>KierNode</key>
+	<string>__NODE__</string>
+	<key>KierRoot</key>
+	<string>__ROOT__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Kier puts plans from your chats in its own Kier calendar, so your iPhone and Watch remind you of them.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Kier puts plans from your chats in its own Kier calendar, so your iPhone and Watch remind you of them.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Kier puts tasks with a date in its own Kier list in Reminders, so your iPhone and Watch remind you of them.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Kier puts tasks with a date in its own Kier list in Reminders, so your iPhone and Watch remind you of them.</string>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>__KIER_UPDATE_FEED__</string>
+	<key>SUPublicEDKey</key>
+	<string>/g86fi9Wo0VnN28uPjjqlAVyImS/rQLkxkYKV2VgOYQ=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
+</dict>
+</plist>

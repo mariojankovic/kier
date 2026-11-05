@@ -1,0 +1,280 @@
+[
+  {
+    "version": "0.7.4",
+    "date": "2026-11-05",
+    "title": "Kier's code is public",
+    "notes": [
+      "Kier's source is public, so you can read every line that touches your data.",
+      "Setup asks you once to agree to the terms of use.",
+      "Hand-offs to Claude or Codex show you the exact brief first, and nothing is sent until you press Send.",
+      "Reminders you wrote are only ticked off when you confirm, or when you did it yourself.",
+      "Switching a source off or forgetting something now applies everywhere, including your profile and MCP.",
+      "The app, its background service and its models now prove who they are to each other.",
+      "Texts from senders without a phone number no longer show up under the wrong contact."
+    ],
+    "summary": "Kier's code is public, with tighter privacy and security."
+  },
+  {
+    "version": "0.7.3",
+    "date": "2026-11-04",
+    "title": "Requests for someone else stay off your list",
+    "notes": [
+      "A group request addressing another participant by name waits under Maybe yours, as an explicit mention does."
+    ],
+    "summary": "Requests for someone else stay off your list."
+  },
+  {
+    "version": "0.7.2",
+    "date": "2026-11-04",
+    "title": "A sharper orb",
+    "notes": [
+      "The orb uses a higher-resolution version of its artwork, the same one getkier.com now shows."
+    ],
+    "summary": "A sharper orb."
+  },
+  {
+    "version": "0.7.1",
+    "date": "2026-11-04",
+    "title": "A smoother turning orb",
+    "notes": [
+      "When the orb turns, its edge reflects the sky instead of stretching."
+    ],
+    "summary": "A smoother turning orb."
+  },
+  {
+    "version": "0.7.0",
+    "date": "2026-11-04",
+    "title": "Your own model, and an orb that turns to you",
+    "notes": [
+      "Choose the model that reads your messages in Setup, System: Kier's own, or your own Ollama or OpenAI-compatible server, on this Mac, another Mac or a server you run. Kier checks it answers first and shows what it sends there.",
+      "The island's orb is now the artwork from Kier's icon. Hover it and it turns toward your pointer with a pearl light along its edge; open the panel and it turns toward that. At night its star stays lit.",
+      "A question addressed to you becomes a reply card, titled with the question.",
+      "Someone else's plans in a chat no longer become your task, and an appointment needs a time or a meeting in the message."
+    ],
+    "summary": "Use your own model server, and a new orb that turns toward you."
+  },
+  {
+    "version": "0.6.5",
+    "date": "2026-11-04",
+    "title": "Call back and pick up where you left off",
+    "notes": [
+      "Missed calls from saved contacts become callback suggestions. Repeated misses stay together, your promise sets the timing, and a connected call clears the card.",
+      "Codex cards show the right logo and open the conversation in the Codex app.",
+      "View more in Done opens your completed history inside Kier.",
+      "New pull request suggestions require you to be the author, assignee, or a requested reviewer."
+    ],
+    "summary": "Callback suggestions, Codex app links, and completed history in Kier."
+  },
+  {
+    "version": "0.6.4",
+    "date": "2026-11-03",
+    "title": "Fewer distractions, easier setup",
+    "notes": [
+      "Better at spotting what's yours to do, with fewer cards from other people's promises or unrelated conversations.",
+      "Clearer task titles and fewer duplicate Discord cards. Rename any card by hand or in its chat.",
+      "Setup is split into tabs, making permissions, sources, and preferences easier to find.",
+      "Quit from the panel's three-dot menu or by right-clicking the island.",
+      "Clicks around the island reach the app underneath, and source icons no longer appear clipped."
+    ],
+    "summary": "Better task ownership, fewer duplicate cards, and a tidier Setup. Plus easier quit controls and fixes for clicks near the island."
+  },
+  {
+    "version": "0.6.3",
+    "date": "2026-11-02",
+    "title": "Your reminders, ticked off when they're done",
+    "notes": [
+      "Turn on Your reminders and your own reminders with a date become cards in Kier. Mark one done here, or let Kier see it done in your chats or work, and it's ticked off in Reminders too. Tick one off there and it's done here.",
+      "Kier and your Calendar and Reminders are now three switches, each off until you turn it on: plans in a Kier calendar, tasks in a Kier list, and your own reminders.",
+      "The second opinion can be installed from Setup. Until now it said it wasn't installed and offered no way to install it.",
+      "Mine, beside Not mine, puts a card from Maybe yours on your list for good.",
+      "Diagnostics in Settings: a report for a bug report that you see in full before you copy it, with no names, messages or files in it. Kier never sends it.",
+      "A file a Claude or Codex session left uncommitted doesn't come back as a new card once you've closed it, and reminders no longer show twice in your day."
+    ]
+  },
+  {
+    "version": "0.6.2",
+    "date": "2026-11-02",
+    "title": "Search finds what you meant",
+    "notes": [
+      "Find anything puts what says your words exactly first, and no one kind fills the list: searching a game's name shows the pages about it and the chats where you talk about it, not every \"wow\".",
+      "The search field is ready to type in every time the bar opens, the first time too.",
+      "A Claude notice found in search opens the conversation it came from, and a card it finds opens even when it isn't on your list yet.",
+      "Clicking a nudge opens its card, also when the card is dated weeks ahead or the panel is already open.",
+      "A reply on Discord is read as its own words, not the message it answers, so a participant's \"STIZEM\" to your invite no longer becomes a card asking you to RSVP. Replies Kier already read are fixed too."
+    ]
+  },
+  {
+    "version": "0.6.1",
+    "date": "2026-11-02",
+    "title": "Search keeps up with your typing",
+    "notes": [
+      "Find anything shows results as you type, in about a tenth of a second, even while Kier is reading in the background. What Kier makes of a longer request follows a second or two after you pause, and the mark turns while it thinks.",
+      "The shortcuts for opening Kier and for Find anything can be changed in Settings, under Shortcuts.",
+      "An answer you send the same minute someone asks closes their question, so a quick reply on Discord no longer leaves a card behind.",
+      "Croatian exclamations like \"bokte\" are no longer read as someone's name.",
+      "A card only lists work that's about it, and one you closed yourself says \"You marked it done\"."
+    ]
+  },
+  {
+    "version": "0.6.0",
+    "date": "2026-11-02",
+    "title": "Find anything with ⌥⌘Space",
+    "notes": [
+      "Press ⌥⌘Space anywhere and ask the way you'd say it: \"the chat about paper boats\", \"what did Nika say about the puzzle\", \"puzzles\". Kier finds the chat, session, card, plan, file or page, and Return opens it where it lives. ⌘Return asks Kier instead. It all runs on your Mac.",
+      "Kier gives way when your Mac is short of memory: it pauses its background reading and lets go of its model until there's room again, so everything else stays quick. It also needs less memory while it reads.",
+      "A request in a group you haven't written in lately, that doesn't name you, waits under Maybe yours instead of going on your list."
+    ]
+  },
+  {
+    "version": "0.5.2",
+    "date": "2026-11-02",
+    "title": "Nudges lead to their card",
+    "notes": [
+      "Clicking a nudge about a card, opens that card instead of the list.",
+      "What you still owe someone who wrote again today stays on your list for the day, so the card a nudge names is always there to find."
+    ]
+  },
+  {
+    "version": "0.5.1",
+    "date": "2026-11-02",
+    "title": "Put back what you finished",
+    "notes": [
+      "A card you marked done, or not yours, offers Put back instead of Mark done again."
+    ]
+  },
+  {
+    "version": "0.5.0",
+    "date": "2026-11-02",
+    "title": "Kier on your iPhone and Watch",
+    "notes": [
+      "Turn on \"On your iPhone and Watch\" in Setup: plans from your chats go in a Kier calendar and tasks with a date in a Kier list in Reminders, with an alert, so your iPhone and Watch remind you. Nothing to install on the phone, and nothing goes anywhere but Apple's own Calendar and Reminders.",
+      "Done works both ways: tick a reminder on your phone and it's done in Kier, finish it in Kier and it's ticked off there. Delete one on your phone and Kier leaves it deleted.",
+      "iMessages are read again on Macs that sync Messages in iCloud.",
+      "A date written like \"9.11.\" is no longer taken for a time."
+    ]
+  },
+  {
+    "version": "0.4.2",
+    "date": "2026-11-01",
+    "title": "The brief comes from the island",
+    "notes": [
+      "The morning and evening brief now slides out of Kier's island like its other nudges, instead of a macOS notification that opened Script Editor when clicked.",
+      "The card after an update says it's what's new, so it doesn't read like a task."
+    ]
+  },
+  {
+    "version": "0.4.1",
+    "date": "2026-11-01",
+    "title": "Cards clear themselves sooner",
+    "notes": [
+      "When a chat settles something on your list, like someone else answering or the person who asked saying it's done, Kier takes the card off within minutes instead of an hour."
+    ]
+  },
+  {
+    "version": "0.4.0",
+    "date": "2026-11-01",
+    "title": "Ask Kier what you said",
+    "notes": [
+      "Ask what you told someone, in any language: Kier searches your chats by what they mean, not only the words, and answers from the messages. Turn it on with one download in Setup; it runs on your Mac.",
+      "Plans agreed in chats show up with your calendar, weekly ones too: \"puzzle club every Saturday at 10:20\" is on every Saturday, at the latest time anyone said.",
+      "Questions about a day, like \"what do I have on Friday?\", get your calendar, your list and your plans for that day.",
+      "When someone you owe writes again, Kier says so: \"Nika sent a message. This is still waiting.\"",
+      "Ask Kier to put a task back, mark it done or move it to tomorrow, and click the button it offers.",
+      "The chat shows what it's doing while it works, Done lists what you finished last first, and the menu bar shows Kier's mark."
+    ]
+  },
+  {
+    "version": "0.3.4",
+    "date": "2026-11-01",
+    "title": "You can see where everything came from",
+    "notes": [
+      "Messages and cards carry the mark of the app they came from: WhatsApp, iMessage, Discord, Threads, X, Claude and more, in one colour that follows light and dark.",
+      "The island looks ahead by day: \"Library Sat\" instead of \"Library tmrw\".",
+      "After each update, Kier shows what changed, in the panel and on getkier.com/changelog."
+    ]
+  },
+  {
+    "version": "0.3.3",
+    "date": "2026-10-31",
+    "title": "A calmer side panel",
+    "notes": [
+      "The panel beside a card is the same black as the window."
+    ]
+  },
+  {
+    "version": "0.3.2",
+    "date": "2026-10-31",
+    "title": "Heads-ups know what an event is for",
+    "notes": [
+      "A reminder like \"Library\" finds the chats about why you're going, so the heads-up says what to bring."
+    ]
+  },
+  {
+    "version": "0.3.1",
+    "date": "2026-10-31",
+    "title": "Events open their own page",
+    "notes": [
+      "Calendar events and reminders open in the panel, with the messages around them."
+    ]
+  },
+  {
+    "version": "0.3.0",
+    "date": "2026-10-31",
+    "title": "Kier runs its own AI",
+    "notes": [
+      "The model that reads your messages now runs inside Kier: no Ollama needed, and about half the memory.",
+      "One download from the card by the island or from Setup."
+    ]
+  },
+  {
+    "version": "0.2.9",
+    "date": "2026-10-31",
+    "title": "Lighter between messages",
+    "notes": [
+      "The local model leaves memory a minute after it's done, instead of staying loaded."
+    ]
+  },
+  {
+    "version": "0.2.8",
+    "date": "2026-10-31",
+    "title": "Hand-offs ask first",
+    "notes": [
+      "When you hand a card to Claude or Codex, they ask before changing anything."
+    ]
+  },
+  {
+    "version": "0.2.5",
+    "date": "2026-10-31",
+    "title": "Updates finish on their own",
+    "notes": [
+      "An update installs and restarts Kier by itself, and the island stays put while it does.",
+      "Cards fade in where they sit, and a card grows into the panel when you open it."
+    ]
+  },
+  {
+    "version": "0.2.4",
+    "date": "2026-10-31",
+    "title": "Safer on your Mac",
+    "notes": [
+      "Kier's local connection needs a key that only your account can read.",
+      "Each AI you connect sees only the sources you allow, and every read is logged.",
+      "Forget removes a chat everywhere, copies included."
+    ]
+  },
+  {
+    "version": "0.2.3",
+    "date": "2026-10-31",
+    "title": "One-click updates",
+    "notes": [
+      "New versions show up as a card by the island. One click and Kier updates itself."
+    ]
+  },
+  {
+    "version": "0.2.0",
+    "date": "2026-10-29",
+    "title": "Kier for Mac",
+    "notes": [
+      "The first release: the island, cards for what you owe people, and a local model that reads your messages on your Mac."
+    ]
+  }
+]

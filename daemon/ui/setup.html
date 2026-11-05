@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up Kier</title>
+<style>
+  :root { --bg: #fbfbfa; --text: #1c1c1e; --muted: #6e6e73; --faint: #a1a1a6; --line: rgba(0,0,0,.08); --accent: #0a66c2; --done: #2f7d32; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161618; --text: #f2f2f4; --muted: #a1a1a6; --faint: #6e6e73; --line: rgba(255,255,255,.1); --accent: #5aa9ff; --done: #7bc47f; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 640px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { font-size: 28px; font-weight: 600; letter-spacing: -.02em; margin: 0 0 6px; }
+  .lead { color: var(--muted); margin: 0 0 32px; }
+  .step { display: grid; grid-template-columns: 28px 1fr auto; gap: 12px; align-items: start; padding: 16px 0; border-top: 1px solid var(--line); }
+  .step:first-child { border-top: 0; }
+  .mark { width: 20px; height: 20px; margin-top: 2px; border-radius: 50%; border: 1.5px solid var(--faint); display: grid; place-items: center; font-size: 12px; }
+  .done .mark { border-color: var(--done); background: var(--done); color: var(--bg); }
+  .later .mark, .optional .mark { border-style: dashed; }
+  .title { font-weight: 600; }
+  .later .title, .later .detail { color: var(--muted); }
+  .optional button { background: var(--line); color: var(--text); }
+  .detail { color: var(--muted); font-size: 14px; margin-top: 2px; }
+  button { font: inherit; font-weight: 500; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 6px 14px; cursor: pointer; white-space: nowrap; }
+  button:disabled { opacity: .5; cursor: default; }
+  .foot { margin-top: 32px; color: var(--muted); font-size: 14px; }
+  a { color: var(--accent); text-decoration: none; }
+  @media (max-width: 700px) { .step { grid-template-columns: 28px 1fr; } .step > div:last-child { grid-column: 2; } .step > div:last-child:empty { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Set up Kier</h1>
+  <p class="lead">Kier keeps a private timeline of your messages, calls and calendar on this Mac, so your AI can answer "what do I have tomorrow?". Nothing leaves this Mac unless you connect an assistant.</p>
+  <section id="steps"></section>
+  <p class="foot" id="foot"></p>
+</main>
+<script type="module">
+import { browserAPI } from '/api.mjs'
+const fetch = await browserAPI({ location, history, sessionStorage, fetch: window.fetch.bind(window) })
+const $ = (s) => document.querySelector(s)
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+let hadFda = null
+let shown = ''
+
+// Redraw only on change, so polling never replaces a button under the cursor.
+function render(steps) {
+  const key = JSON.stringify(steps)
+  if (key === shown) return
+  shown = key
+  $('#steps').innerHTML = steps.map((s) => `
+    <div class="step ${s.status}">
+      <div class="mark">${s.status === 'done' ? '✓' : ''}</div>
+      <div><div class="title">${esc(s.title)}</div><div class="detail">${esc(s.detail)}</div>${s.link && /^https:\/\//.test(s.link.url) ? `<a class="detail" href="${esc(s.link.url)}" target="_blank" rel="noopener noreferrer">${esc(s.link.label)}</a>` : ''}</div>
+      <div>${s.action ? `<button data-act="${esc(s.action.id)}">${esc(s.action.label)}</button>` : ''}</div>
+    </div>`).join('')
+  const left = steps.filter((s) => s.status === 'todo').length
+  $('#foot').innerHTML = left ? `${left} ${left === 1 ? 'step' : 'steps'} left. This page updates by itself as you go.` : 'All set. <a href="/">Open your timeline</a>'
+}
+
+async function load() {
+  // Kier restarts itself after some steps; keep the last checklist and try again on the next poll.
+  let steps
+  try { ({ steps } = await (await fetch('/api/setup')).json()) } catch { $('#foot').textContent = 'Kier is restarting, one moment.'; return }
+  const fda = steps.find((s) => s.id === 'fda')?.status === 'done'
+  // The moment Full Disk Access is granted, read Messages, calls and calendar instead of waiting 5 minutes.
+  if (hadFda === false && fda) {
+    render(steps)
+    const res = await fetch('/api/setup/collect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    hadFda = true
+    return render((await res.json()).steps)
+  }
+  hadFda = fda
+  render(steps)
+}
+
+document.addEventListener('click', async (e) => {
+  const id = e.target.dataset.act
+  if (!id) return
+  e.target.disabled = true
+  e.target.textContent = 'Working…'
+  const res = await fetch(`/api/setup/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+  if (res.ok) render((await res.json()).steps)
+  else { e.target.disabled = false; e.target.textContent = 'Try again' }
+})
+
+load()
+setInterval(() => { if (document.visibilityState === 'visible') load() }, 3000)
+</script>
+</body>
+</html>

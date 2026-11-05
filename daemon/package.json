@@ -1,0 +1,21 @@
+{
+  "name": "kier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kier remembers what you owe people across your chats, and notices when it is done.",
+  "type": "module",
+  "bin": {
+    "kier": "bin/kier.mjs"
+  },
+  "engines": {
+    "node": ">=23"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning bin/kier.mjs run",
+    "test": "node --disable-warning=ExperimentalWarning --test 'tests/*.test.mjs'"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  }
+}
