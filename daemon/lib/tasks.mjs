@@ -126,9 +126,9 @@ export function tasks(db, { days = 14, sources, auth = authorization(sources ?? 
       if (call) { state = 'handled'; reason = call.seconds > 0 ? `you spoke, ${Math.max(1, Math.round(call.seconds / 60))} min` : 'you spoke'; r.done_at = call.ts }
     }
     if (!ownerCreated(r) && !phoneTask && state === 'open' && !r.status && !r.from_me && r.source !== 'ai' && r.model !== 'later') {
-      // A reply closes a request a reply can settle, dated or not: replying was the task. Payments, dated items and
-      // real work stay open: "ok" doesn't pay the bill or write the plan.
-      if ((r.card === 'reply' || (!r.amount && !r.due && !WORK.test(r.summary || ''))) && (r.reply = replied.get(r.source, r.thread, r.ts, r.ts, r.rid, r.ts + 7 * 86400))) { state = 'looks_done'; reason = 'Looks done: you replied in this chat'; r.done_at = r.reply.ts }
+      // A reply closes a request a reply can settle, dated or not: replying was the task, so this is not a guess and
+      // needs no confirmation. Payments, dated items and real work stay open: "ok" doesn't pay the bill or write the plan.
+      if ((r.card === 'reply' || (!r.amount && !r.due && !WORK.test(r.summary || ''))) && (r.reply = replied.get(r.source, r.thread, r.ts, r.ts, r.rid, r.ts + 7 * 86400))) { state = 'handled'; reason = 'you replied in this chat'; r.done_at = r.reply.ts }
       else {
         // Work closes only when a first-person completed action matches this task.
         // Other replies go to the done-check and can only suggest confirmation.

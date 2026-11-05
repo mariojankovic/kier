@@ -112,6 +112,7 @@ export function open(path = dbPath, { readOnly = false } = {}) {
   repairCompletionProvenance(db)
   repairMcpThreads(db)
   repairImportedAuthorship(db)
+  keepEarlierClosures(db)
   return db
 }
 
@@ -266,6 +267,28 @@ function repairCompletionProvenance(db) {
   db.exec('begin')
   try {
     db.exec("update task_state set status = 'looks_done', completion_origin = null where completion_origin = 'owner-message'")
+    db.prepare('insert into migrations values (?, ?)').run(version, now())
+    db.exec('commit')
+  } catch (e) { db.exec('rollback'); throw e }
+}
+
+// Updates must not reopen what the owner had stopped seeing. Before 0.7.7 a reply of the owner's in the same chat
+// closed most cards; stricter rules now leave some open. Cards older than two days that the owner answered in that
+// chat within a day stay closed, and Reminders deletions from before origins were recorded count as the owner's.
+// Nothing here reaches Apple Reminders: no completion origin is claimed for them.
+function keepEarlierClosures(db) {
+  const version = 'keep-earlier-closures-v1'
+  if (db.prepare('select 1 from migrations where id = ?').get(version)) return
+  db.exec('begin')
+  try {
+    db.exec("update task_state set completion_origin = 'reminders' where reason = 'deleted in Reminders' and completion_origin is null")
+    const cutoff = now() - 2 * 86400
+    db.prepare(`insert or ignore into task_state (item_id, status, changed_at, reason)
+      select t.item_id, 'handled', ?, 'closed by an earlier version of Kier' from tags t join items i on i.id = t.item_id
+      left join task_state s on s.item_id = t.item_id
+      where t.is_task = 1 and s.item_id is null and i.from_me = 0 and i.ts < ? and i.source not in ('kier', 'reminders', 'ai')
+        and exists (select 1 from items o where o.source = i.source and o.thread = i.thread and o.from_me = 1
+          and o.ts > i.ts and o.ts <= i.ts + 86400)`).run(now(), cutoff)
     db.prepare('insert into migrations values (?, ?)').run(version, now())
     db.exec('commit')
   } catch (e) { db.exec('rollback'); throw e }

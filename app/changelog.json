@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.7.8",
+    "date": "2026-11-05",
+    "title": "Answered chats stay closed",
+    "notes": [
+      "Chats you already answered no longer come back asking you to confirm."
+    ],
+    "summary": "Answered chats stay closed."
+  },
+  {
     "version": "0.7.7",
     "date": "2026-11-05",
     "title": "Apple Mail works, and Kier is more careful",
