@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.5",
+    "date": "2026-11-05",
+    "title": "Ticking things off is instant again",
+    "notes": [
+      "Marking a card done responds right away again; 0.7.4's new privacy checks were rereading every message for each lookup.",
+      "Search and Ask stay quick while Kier respects the sources you switched off and the things you forgot."
+    ],
+    "summary": "Ticking things off is instant again."
+  },
+  {
     "version": "0.7.4",
     "date": "2026-11-05",
     "title": "Kier's code is public",
