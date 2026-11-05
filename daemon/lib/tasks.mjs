@@ -1,8 +1,9 @@
+import { evidenceLine, ownerCreated } from './evidence-trust.mjs'
 import { authorization, readScope } from './authorization.mjs'
 import { callIntent, callbackCompletion } from './callbacks.mjs'
 import { config } from './config.mjs'
 import { localDate } from './dates.mjs'
-import { wordRegex } from './lang.mjs'
+import { authoredText, ownerCompletion, ownerCompletionClaim } from './completion-evidence.mjs'
 import { now } from './db.mjs'
 import { planEvents } from './plans.mjs'
 import { SECOND } from './second.mjs'
@@ -30,7 +31,6 @@ export function dayRange(iso) {
   return [start, end]
 }
 
-const CLEAR_DONE = wordRegex('done', ['evo'])
 const OVERDUE_DAYS = 3
 const MOMENTS = new Set(['appointment', 'reply'])
 // A reply alone does not complete substantive work. Let the done-check inspect the later chat
@@ -73,7 +73,7 @@ export function markTask(db, id, status) {
   db.prepare(`insert into task_state (item_id, status, changed_at, reason, completion_origin) values (?, ?, ?, ?, ?)
     on conflict(item_id) do update set status = excluded.status, changed_at = excluded.changed_at,
       reason = excluded.reason, completion_origin = excluded.completion_origin, url = null`)
-    .run(id, status, now(), reason, status === 'done' ? 'owner' : null)
+    .run(id, status, now(), reason, ['done', 'dismissed'].includes(status) ? 'owner' : null)
 }
 
 // Every task Kier knows about, with a state the brief can act on: open, overdue, handled, done or dismissed.
@@ -84,12 +84,12 @@ export function tasks(db, { days = 14, sources, auth = authorization(sources ?? 
     select i.id, i.rowid rid, i.source, i.thread, i.sender, i.from_me, i.ts, coalesce(t.said, i.text) text, i.text raw_text, i.url, i.meta, t.due, t.when_words, t.amount, t.urgency, t.summary, t.second, t.quiet, t.confirmed, t.card, t.hint, t.hint_url, t.model, s.status, s.reason, s.url evidence_url, s.changed_at done_at, s.completion_origin
     from tags t join items i on i.id = t.item_id left join task_state s on s.item_id = i.id
     where t.is_task = 1 and (i.ts > ? or t.due >= ? or s.changed_at > ?
-      or (i.source = 'kier' and (s.status is null or s.status in ('open', 'snoozed')))
-      or (t.card = 'callback' and (s.status is null or s.status in ('open', 'snoozed')))) ${sourceFilter(sources)}
+      or (i.source = 'kier' and (s.status is null or s.status in ('open', 'snoozed', 'looks_done', 'looks_unneeded')))
+      or (t.card = 'callback' and (s.status is null or s.status in ('open', 'snoozed', 'looks_done', 'looks_unneeded')))) ${sourceFilter(sources)}
     order by i.ts desc`).all(now() - days * 86400, plusDays(t0, -days), now() - days * 86400)
   // Include later rows from the same minute: some sources provide minute-resolution timestamps.
   const replied = db.prepare('select ts from items where source = ? and thread = ? and from_me = 1 and (ts > ? or (ts = ? and rowid > ?)) and ts < ? order by ts, rowid limit 1')
-  const replies = db.prepare('select text, ts from items where source = ? and thread = ? and from_me = 1 and (ts > ? or (ts = ? and rowid > ?)) and ts < ? order by ts, rowid limit 30')
+  const replies = db.prepare('select * from items where source = ? and thread = ? and from_me = 1 and (ts > ? or (ts = ? and rowid > ?)) and ts < ? order by ts, rowid limit 30')
   return rows.filter(r => r.confirmed === 1 || r.status || !priorityStatement(r)).map((r) => {
     // old tags get the same wording and card rule without rewriting the vault.
     r.summary = actionTitle(r.summary, r)
@@ -99,8 +99,9 @@ export function tasks(db, { days = 14, sources, auth = authorization(sources ?? 
     let state = r.status || 'open'
     let reason = r.reason || null
     // Older model verdicts also need confirmation before original reminders can close.
-    if (r.source === 'reminders' && ['done', 'handled'].includes(state)
-        && !['owner', 'owner-message', 'reminders'].includes(r.completion_origin)) state = 'looks_done'
+    if (ownerCreated(r) && ['done', 'handled'].includes(state)
+        && !['owner', 'reminders'].includes(r.completion_origin)) state = 'looks_done'
+    if (ownerCreated(r) && state === 'dismissed' && !['owner', 'reminders'].includes(r.completion_origin) && r.reason !== 'marked in the timeline') state = 'looks_unneeded'
     let callback = {}
     try { callback = JSON.parse(r.meta || '{}') } catch {}
     const phoneTask = r.card === 'callback' || callIntent(r)
@@ -120,20 +121,23 @@ export function tasks(db, { days = 14, sources, auth = authorization(sources ?? 
     // A card you reopened (Undo on a "done" toast) stays open: no automatic rule closes it again.
     // A follow-up handed back for later ("pitaj me kad završim…") isn't settled by your "ok, pingam te": that's you
     // agreeing to it. It closes when you follow up, which the done-check reads.
-    if (phoneTask && (!r.status || r.status === 'snoozed')) {
+    if (!ownerCreated(r) && phoneTask && (!r.status || r.status === 'snoozed')) {
       const call = callbackCompletion(db, r)
       if (call) { state = 'handled'; reason = call.seconds > 0 ? `you spoke, ${Math.max(1, Math.round(call.seconds / 60))} min` : 'you spoke'; r.done_at = call.ts }
     }
-    if (!phoneTask && state === 'open' && !r.status && !r.from_me && r.source !== 'ai' && r.model !== 'later') {
+    if (!ownerCreated(r) && !phoneTask && state === 'open' && !r.status && !r.from_me && r.source !== 'ai' && r.model !== 'later') {
       // A reply closes a request a reply can settle, dated or not: replying was the task. Payments, dated items and
       // real work stay open: "ok" doesn't pay the bill or write the plan.
-      if ((r.card === 'reply' || (!r.amount && !r.due && !WORK.test(r.summary || ''))) && (r.reply = replied.get(r.source, r.thread, r.ts, r.ts, r.rid, r.ts + 7 * 86400))) { state = 'handled'; reason = 'you replied in this chat'; r.done_at = r.reply.ts }
+      if ((r.card === 'reply' || (!r.amount && !r.due && !WORK.test(r.summary || ''))) && (r.reply = replied.get(r.source, r.thread, r.ts, r.ts, r.rid, r.ts + 7 * 86400))) { state = 'looks_done'; reason = 'Looks done: you replied in this chat'; r.done_at = r.reply.ts }
       else {
-        // Work, payments and dated things close when your reply there plainly says done ("platio sam", "paid"); a
-        // reply that doesn't goes to the done-check first, which reads it in context ("evo jesam" after "plati odma").
+        // Work closes only when a first-person completed action matches this task.
+        // Other replies go to the done-check and can only suggest confirmation.
         const after = replies.all(r.source, r.thread, r.ts, r.ts, r.rid, r.ts + 86400).filter((x) => x.text)
-        const said = after.find((x) => CLEAR_DONE.test(x.text))
-        if (said) { state = 'handled'; reason = `you said so: "${String(said.text).slice(0, 80)}"`; r.done_at = said.ts }
+        const said = after.find(x => ownerCompletion(x, r))
+        // Text matching alone never hides a card: it suggests, and one tap confirms. Rule matching keeps finding
+        // new edge cases (other payee, other currency, a word that is also a currency code), so it only proposes.
+        if (said) { state = 'looks_done'; reason = `Looks done: you said "${authoredText(said).slice(0, 80)}"` }
+        else if (after.some(x => ownerCompletionClaim(x, r))) { state = 'looks_done'; reason = 'Looks done: confirm this obligation was fully completed' }
         else if (after.length) r.answered = after.at(-1).ts
       }
     }
@@ -234,7 +238,7 @@ export function brief(db, { sources, auth = authorization(sources ?? null) } = {
   db = readScope(db, auth)
   const t0 = today()
   const week = plusDays(t0, 7)
-  const all = dedupe(tasks(db, { sources }).filter((t) => ['open', 'overdue', 'looks_done'].includes(t.state)))
+  const all = dedupe(tasks(db, { sources }).filter((t) => ['open', 'overdue', 'looks_done', 'looks_unneeded'].includes(t.state)))
   const ev = events(db, t0, week, { sources })
   // Tasks both models agree on make the brief; the ones the second opinion doubts wait under "Maybe yours".
   const live = all.filter((t) => !t.maybe)
@@ -245,7 +249,7 @@ export function brief(db, { sources, auth = authorization(sources ?? null) } = {
   // stays in the brief for a day; requests from other people stay until answered or 3 days pass.
   const recent = (t) => t.source === 'kier' || t.card === 'callback' || t.due || t.ts > now() - (t.from_me ? OWN_UNDATED_HOURS * 3600 : OVERDUE_DAYS * 86400) || back.has(t.id)
   const maybe = top(all.filter((t) => t.maybe && recent(t)))
-  const forgotten = top(live.filter((t) => t.state === 'overdue' || (t.state === 'looks_done' && t.due && t.due < t0)))
+  const forgotten = top(live.filter((t) => t.state === 'overdue' || (['looks_done', 'looks_unneeded'].includes(t.state) && t.due && t.due < t0)))
   const open = top(live.filter((t) => !t.due && recent(t)), (t) => back.get(t.id) || t.ts)
   const b = {
     date: t0,
@@ -373,20 +377,22 @@ const line = (t) => {
 const eventLine = (e) => `${e.allDay ? 'all day' : timeLabel(e.ts)} ${e.text}`
 
 // Provide explicitly dated day summaries so the model does not infer weekdays from old messages.
-export function daysText(db, from, to) {
+export function daysText(db, from, to, { evidenceLabels = false } = {}) {
+  const taskText = t => evidenceLabels ? evidenceLine(t, line(t)) : line(t)
+  const eventText = e => evidenceLabels ? evidenceLine({ ...e, source: 'calendar' }, eventLine(e)) : eventLine(e)
   const t0 = today()
   const live = dedupe(tasks(db).filter((t) => (t.state === 'open' || t.state === 'overdue') && !t.maybe))
   const ev = events(db, from, to)
   const name = (iso) => (iso === t0 ? `Today, ${dayLabel(iso)}` : iso === plusDays(t0, 1) ? `Tomorrow, ${dayLabel(iso)}` : dayLabel(iso))
   const out = []
   for (let d = from; d <= to; d = plusDays(d, 1)) {
-    const lines = [...ev.filter((e) => e.day === d).map(eventLine), ...live.filter((t) => t.due === d).map(line)]
+    const lines = [...ev.filter((e) => e.day === d).map(eventText), ...live.filter((t) => t.due === d).map(taskText)]
     out.push(lines.length ? `${name(d)}:` : `${name(d)}: nothing on the calendar or the list`, ...lines.map((l) => `- ${l}`))
   }
   // Asked about today, what's still waiting from before is on today's plate too.
   if (from === t0) {
     const b = brief(db)
-    const still = [...b.forgotten.map((t) => `${line(t)}, was due ${dayLabel(t.due)}`), ...b.open.map(line)]
+    const still = [...b.forgotten.map((t) => `${taskText(t)}, was due ${dayLabel(t.due)}`), ...b.open.map(taskText)]
     if (still.length) out.push('', 'Still open from before:', ...still.map((l) => `- ${l}`))
   }
   return out.join('\n')

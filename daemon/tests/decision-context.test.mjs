@@ -16,7 +16,9 @@ test('the decision sidecar receives the owner question separately from the short
  const wire=decisionMessage(item),actual=state(wire)
  assert.equal(actual.message_to_judge.text,item.text)
  assert.equal(actual.message_to_judge.from,'Nika')
- assert.deepEqual(actual.earlier_messages,item.context)
+ assert.deepEqual(actual.earlier_messages,wire.context)
+ assert.ok(actual.earlier_messages.every(c=>c.trust.untrusted))
+ assert.equal(actual.message_to_judge.trust.authorship,'other')
  assert.ok(!actual.message_to_judge.text.includes('sorting the paper'))
 })
 test('long chat history is bounded while the current message remains unchanged',()=>{

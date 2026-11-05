@@ -1566,7 +1566,7 @@ struct CompanionView: View {
                     done: { store.archive(c.key) }, doneHelp: "Put this chat away") { go(.chat(c.key)) }
           }
           ForEach(waiting) { c in
-            HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, "done") }, doneHelp: c.looksDone ? "Confirm" : "Mark done", evidence: c.looksDone ? c.reason : nil) { go(.item(c.id)) }
+            HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, c.confirmStatus) }, doneHelp: c.needsConfirmation ? "Confirm" : "Mark done", evidence: c.needsConfirmation ? c.reason : nil) { go(.item(c.id)) }
           }
           if waiting.isEmpty { AllClear(done: doneByKier.filter { $0.state == "handled" }.count, next: comingUp.isEmpty ? nextEvent : nil) }
           if !comingUp.isEmpty {
@@ -1582,7 +1582,7 @@ struct CompanionView: View {
             Text("Maybe yours").font(.caption.weight(.medium)).foregroundStyle(.secondary)
               .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 2)
             ForEach(maybe) { c in
-              HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, "done") }, doneHelp: c.looksDone ? "Confirm" : "Mark done", evidence: c.looksDone ? c.reason : nil) { go(.item(c.id)) }
+              HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, c.confirmStatus) }, doneHelp: c.needsConfirmation ? "Confirm" : "Mark done", evidence: c.needsConfirmation ? c.reason : nil) { go(.item(c.id)) }
                 .opacity(0.75)
             }
           }
@@ -1904,7 +1904,7 @@ struct ItemPage: View {
         if ticked {
           Button("Put back") { store.mark(card, "open"); back() }.buttonStyle(.borderless).focusable(false).help("Not done: back on the list")
         } else {
-          Button { store.mark(card, "done"); back() } label: { Label(card.looksDone ? "Confirm" : "Mark done", systemImage: "checkmark") }.buttonStyle(.borderless).focusable(false)
+          Button { store.mark(card, card.confirmStatus); back() } label: { Label(card.needsConfirmation ? "Confirm" : "Mark done", systemImage: "checkmark") }.buttonStyle(.borderless).focusable(false)
         }
       }
       .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
@@ -1932,11 +1932,11 @@ struct ItemPage: View {
               }
             }
             if let hint = card.hint, !ticked { Label("Maybe done by: \(hint)", systemImage: "arrow.triangle.branch").font(.caption).foregroundStyle(.teal) }
-            if card.looksDone {
+            if card.needsConfirmation {
               VStack(alignment: .leading, spacing: 4) {
-                Text("Looks done").font(.caption.weight(.medium))
+                Text(card.suggestionLabel).font(.caption.weight(.medium))
                 if let reason = card.reason { Text(howDone(reason) ?? reason).font(.caption).foregroundStyle(.secondary) }
-                Button("Not done") { store.mark(card, "open"); back() }.buttonStyle(.borderless)
+                Button(card.looksUnneeded ? "Keep" : "Not done") { store.mark(card, "open"); back() }.buttonStyle(.borderless)
               }
             }
             // Ticked off by Kier: how it knows, and the proof itself when it's a link (a commit, a pull request).

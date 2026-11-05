@@ -1,3 +1,4 @@
+import { activeMcpSources } from './app-permissions.mjs'
 // A read context travels with the database through nested evidence and summary readers.
 // SQL views filter before joins, ordering and limits, including helpers unaware of scopes.
 import { off } from './settings.mjs'
@@ -20,7 +21,7 @@ const permittedCache = new WeakMap()
 let permittedSeq = 0
 function permittedRows(db, filter) {
   try {
-    const changes = () => db.prepare('select total_changes() n').get().n
+    const changes = () => `${db.prepare('select total_changes() n').get().n}:${db.prepare('pragma data_version').get().data_version}`
     const cache = permittedCache.get(db) || { tables: [] }
     const hit = cache.tables.find((t) => t.filter === filter && t.changes === changes())
     if (hit) return hit.name
@@ -40,10 +41,13 @@ export function readScope(db, auth) {
   if (scoped.has(db)) return db // Nested readers cannot widen their caller's view.
   if (!auth) throw Error('AUTHORIZATION_REQUIRED')
   auth = authorization(auth.allowedSources, auth.disabledSources)
-  const restricted = auth.allowedSources !== null || auth.disabledSources.length > 0
+  const activeMcp = activeMcpSources()
+  const hiddenMcp = db.prepare(`select 1 from items where source = 'mcp' and
+    (source_id is null or source_id not in (${activeMcp.map(() => '?').join(',') || "''"})) limit 1`).get(...activeMcp)
+  const restricted = auth.allowedSources !== null || auth.disabledSources.length > 0 || !!hiddenMcp
   const list = (xs) => xs.map((s) => `'${s}'`).join(',') || "''"
   const condition = `${auth.allowedSources === null ? '1' : `source in (${list(auth.allowedSources)})`} and source not in (${list(auth.disabledSources)})`
-  const filter = `${condition} and kier_origin_permitted(source, thread, meta, '${JSON.stringify(auth.disabledSources)}') and not exists (select 1 from main.forgotten where key = kier_forget_key('item', id) or key = kier_forget_key('thread', source, coalesce(thread, '')))`
+  const filter = `${condition} and (source != 'mcp' or source_id in (${list(activeMcp)})) and kier_origin_permitted(source, thread, meta, '${JSON.stringify(auth.disabledSources)}', source_id) and not exists (select 1 from main.forgotten where key = kier_forget_key('item', id) or key = kier_forget_key('thread', source, coalesce(thread, '')))`
   const permitted = permittedRows(db, filter)
   const views = [permitted ? `items as (select rowid, * from main.items where rowid in (select id from temp.${permitted}))`
     : `items as (select rowid, * from main.items where ${filter})`]

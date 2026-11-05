@@ -1,3 +1,6 @@
+import { editSource, sourceList, sourceSummary } from './mcp-source-config.mjs'
+import { sourceJob } from './mcp-sources.mjs'
+import { collect as collectMcp } from '../collectors/mcp.mjs'
 import { readSecret, verifier, signResponse, openBody, mac } from './http-auth.mjs'
 import { capturePolicy } from './app-permissions.mjs'
 import { readScope, localAuthorization } from './authorization.mjs'
@@ -159,6 +162,7 @@ export function serve(db, { install, port = config.port } = {}) {
       if (url.pathname.startsWith('/api/') && !nonce && !authedBrowser(req)) return json(res, { error: 'authentication required' }, 401)
       if (url.pathname === '/api/browser-ticket' && req.method === 'POST' && nonce) return json(res, { ticket: issueTicket(`http://${req.headers.host}`) })
       if (url.pathname === '/api/model-settings' && req.method === 'GET') return json(res, modelSettings())
+      if (url.pathname === '/api/mcp-sources' && req.method === 'GET') return json(res, { sources: sourceSummary() })
       if (url.pathname === '/api/setup') return json(res, { steps: await steps(db, eyes) })
       // A report for a bug, from an allow-list only (diagnostics.mjs); Settings shows it whole, nothing sends it.
       if (url.pathname === '/api/diagnostics') return json(res, { text: await diagnostics(db, { steps: await steps(db, eyes) }) })
@@ -218,6 +222,18 @@ export function serve(db, { install, port = config.port } = {}) {
       }
       // Writes take JSON only, so a cross site form post can't trigger them.
       const post = req.method === 'POST' && req.headers['content-type'] === 'application/json'
+      if (url.pathname.startsWith('/api/mcp-sources') && post) {
+        if (requestBody.length > 64000) return json(res, { ok: false, error: 'MCP settings are too large.' }, 400)
+        try {
+          const input = JSON.parse(requestBody || '{}')
+          if (url.pathname === '/api/mcp-sources') return json(res, { ok: true, id: editSource(input), sources: sourceSummary() })
+          const source = sourceList().find(s => s.id === input.id)
+          if (!source) throw Error('MCP_SOURCE_MISSING')
+          if (url.pathname === '/api/mcp-sources/tools') return json(res, { ok: true, ...await sourceJob(source, 'list') })
+          if (url.pathname === '/api/mcp-sources/sync') return json(res, { ok: true, added: await collectMcp(db, { force: true, only: source.id }) })
+          return json(res, { ok: false }, 404)
+        } catch { return json(res, { ok: false, error: 'Could not use this MCP source. Check the command or URL, tool and JSON arguments. Only tools marked read only are offered.' }, 400) }
+      }
       if (url.pathname === '/api/ingest' && post) {
         const body = requestBody
         return json(res, { ok: true, added: ingest(db, JSON.parse(body)) })
@@ -381,7 +397,7 @@ export function serve(db, { install, port = config.port } = {}) {
         }
         return json(res, { turns: db.prepare('select q, a, agent, seconds from chats where key = ? order by ts').all(String(q.key || '')) })
       }
-      if (url.pathname === '/api/vault') return json(res, vault(db))
+      if (url.pathname === '/api/vault') return json(res, vault(readScope(db, localAuthorization())))
       // The chat around a card, the whole burst it was read from, and what happened after it.
       if (url.pathname === '/api/context') {
         const scopedDb = readScope(db, localAuthorization())

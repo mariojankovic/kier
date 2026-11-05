@@ -1,3 +1,4 @@
+import { evidenceLine, untrustedBlock, EVIDENCE_RULE, briefEvidence } from './evidence-trust.mjs'
 import { ASK_DETAILS, createReminder, modelReminder, reminderIntent, reminderRequest } from './create-reminder.mjs'
 import { CODEX_UNAVAILABLE } from './ask-isolation.mjs'
 import { authorization, readScope, localAuthorization } from './authorization.mjs'
@@ -15,7 +16,7 @@ import { profileText } from './profile.mjs'
 const cap = (s) => s[0].toUpperCase() + s.slice(1)
 import { aboutItem } from './resolve.mjs'
 import { sent } from './settings.mjs'
-import { brief, briefText, dayLabel, daysText, plusDays, tasks, today } from './tasks.mjs'
+import { brief, dayLabel, daysText, plusDays, tasks, today } from './tasks.mjs'
 import { person as named, search } from './meaning.mjs'
 
 const first = (paths) => paths.find((p) => existsSync(p)) || null
@@ -32,15 +33,16 @@ export const agents = () => ({ claude: !!CLAUDE, codex: false, kier: true, unava
 // prevent the model from using newly available evidence.
 const REFUSED = /\b(don'?t|do not|cannot|can'?t|unable to|not able to|no access)\b[^.]{0,80}\b(know|have|access|information|tell|provide|share|details)\b/i
 const turn = (h) => `${config.me}: ${h.q}${!h.a || REFUSED.test(h.a) ? '' : `\nKier: ${h.a}`}`
-const thread = (history = []) => history.length ? `The conversation so far:\n${history.map(turn).join('\n\n')}\n\n` : ''
 // Who the owner is (profile.mjs) goes along with every question, so "tell me about myself" has an answer.
-// Earlier answers in the same chat may predate the profile ("I don't know who you are"), so it outranks them.
-const who = () => { const p = profileText(); return p ? `\n\nWho ${config.me} is, from Kier's profile of ${P.him} (trust this over anything said earlier in the chat):\n${p}\n\n` : '\n\n' }
-const intro = (q, history, about) => `You are Kier, ${config.me}'s quiet assistant on ${P.his} Mac. Talk to ${P.him} as "you". Use the kier tools to look at ${P.his} vault (messages, calls, calendar, tasks, commits) before answering. Answer in at most 4 short sentences, plainly, no lists unless asked, no em dashes.\n\n` +
-  (about ? `${cap(P.he)} ${P.he === 'they' ? 'are' : 'is'} asking about one item in ${P.his} vault. What Kier already knows about it, including a live look at where such things usually go ("${config.me}" in it is ${P.him}):\n\n${about}\n\n` : '') + `${thread(history)}${config.me} asks: ${q}`
+const who = () => { const p = profileText(); return p ? `\n\nWho ${config.me} is, from Kier's profile of ${P.him}:\n${p}\n\n` : '\n\n' }
+const intro = (q, history, about) => `You are Kier, ${config.me}'s quiet assistant. Use the kier tools before answering. Answer plainly in at most 4 short sentences. ${EVIDENCE_RULE}
+
+${untrustedBlock({ about, history })}
+
+Owner question: ${q}`
 
 // About one item, the local model answers from what the vault shows about it; otherwise from today's brief.
-const ITEM = `You are Kier, ${config.me}'s quiet assistant, and you are talking with ${config.me} ${P.self}: every "${config.me}" below is ${P.him}, so call ${P.him} "you", never by name. You're asked about one item in ${P.his} vault; below is everything the vault shows about it: what happened since, the rest of that chat, and where such things usually go, checked just now. Answer in at most 3 short sentences. If a line answers it, say so and say where and when; something new where it usually goes, after the item, usually means it's done, even under another name (release notes posted as a blog post about the same change). If nothing does, say what you checked and that it doesn't show yet. Never tell ${P.him} to ask ${P.self}.`
+const ITEM = `You are Kier, ${config.me}'s quiet assistant, and you are talking with ${config.me} ${P.self}: call ${P.him} "you", never by name. You're asked about one item in ${P.his} vault; below is everything the vault shows about it: what happened since, the rest of that chat, and where such things usually go, checked just now. Answer in at most 3 short sentences. If a line answers it, say so and say where and when; something new where it usually goes, after the item, usually means it's done, even under another name (release notes posted as a blog post about the same change). If nothing does, say what you checked and that it doesn't show yet. Never tell ${P.him} to ask ${P.self}.`
 // Answer the requested topic using evidence, rather than substituting the daily brief.
 const DAY = `You are Kier, ${config.me}'s quiet assistant, talking with ${P.him}: call ${P.him} "you", never by name. Answer the question ${P.he} asked, in at most 3 short sentences. When the messages found below answer it, say what was said, quote a few of the words, and say which chat and which day. A plan agreed in a chat is a plan even when it isn't in the calendar, and one that repeats (every Friday) holds for each such day. When messages disagree (a time changed), the latest holds. If nothing below answers it, say you couldn't find it; don't answer a different question.`
 // Spell out upcoming dates and weekdays; do not ask the model to calculate them.
@@ -59,7 +61,7 @@ function said(db, found) {
     return group.get(key) ? `${APP[m.source]} group "${m.thread}"` : `${APP[m.source]} chat with ${m.thread}`
   }
   const when = (m) => new Date(m.ts * 1000).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-  return found.map((m) => `[${where(m)}, ${when(m)}] ${m.from_me ? config.me : m.sender}: ${String(m.text).replace(/\s+/g, ' ').slice(0, 300)}`).join('\n')
+  return found.map((m) => evidenceLine(m, `[${where(m)}, ${when(m)}] ${String(m.text).slice(0, 300)}`)).join('\n')
 }
 
 // Asked to change something on the list ("that chat was marked done, put it back", "that's not mine"): which task, and
@@ -125,11 +127,11 @@ async function actionsFor(db, q, found, item) {
     ...all.filter((t) => ws.some((w) => `${t.summary} ${t.text}`.toLowerCase().includes(w))).slice(0, 6),
   ].map((t) => [t.id, t])).values()].slice(0, 15)
   if (!candidates.length) return []
-  const list = candidates.map((t, i) => `${i + 1}. ${t.summary || String(t.text).slice(0, 80)} (${t.thread || t.source}, ${STATE[t.state] || t.state})`).join('\n')
+  const list = candidates.map((t, i) => evidenceLine(t, `${i + 1}. ${t.summary || String(t.text).slice(0, 80)} (${t.thread || t.source}, ${STATE[t.state] || t.state})`)).join('\n')
   const res = await modelFetch('/api/chat', {
     method: 'POST', signal: AbortSignal.timeout(60000),
     body: JSON.stringify({ model: config.model, asked: true, stream: false, think: false, keep_alive: config.chatKeepAlive, options: { temperature: 0 },
-      messages: [{ role: 'system', content: `${ACT}\n\n${list}` }, { role: 'user', content: q }] }),
+      messages: [{ role: 'system', content: `${ACT} ${EVIDENCE_RULE}` }, { role: 'user', content: `${untrustedBlock(list)}\n\nOwner question: ${q}` }] }),
   })
   if (!res.ok) return []
   const out = parseModelJSON((await res.json()).message.content.match(/\{[\s\S]*\}/)?.[0] ?? '{}')
@@ -171,15 +173,14 @@ async function local(q, history = [], about = '', on = QUIET, item = null) {
   }
   const buttons = ''
   on.status('Thinking')
-  const vault = found.length ? `Messages found for this question, oldest first ("${config.me}" in them is ${P.him}; a "tomorrow" or "this Friday" in one counts from the day it was sent):\n${said(globalThis.kierDb, found)}\n\n` : ''
+  const vault = found.length ? `Messages found for this question, oldest first (a "tomorrow" or "this Friday" in one counts from the day it was sent):\n${said(globalThis.kierDb, found)}\n\n` : ''
   // The days the question names, when it names any, otherwise the brief.
-  const calendar = `${days ? `${cap(P.his)} calendar and list:\n${daysText(globalThis.kierDb, ...days)}` : briefText(brief(globalThis.kierDb))}`
+  const calendar = `${days ? `${cap(P.his)} calendar and list:\n${daysText(globalThis.kierDb, ...days, { evidenceLabels: true })}` : briefEvidence(brief(globalThis.kierDb))}`
   const res = await modelFetch('/api/chat', {
     method: 'POST', signal: AbortSignal.timeout(120000),
     body: JSON.stringify({ model: config.model, asked: true, stream: true, think: false, keep_alive: config.chatKeepAlive, options: { temperature: 0.3, num_ctx: 8192 }, messages: [
-      // Who he is comes last, nearest the question, so it outweighs what was said before.
-      { role: 'system', content: `${about ? ITEM : plans ? ON_DAY : `${DAY} ${week()}`}${buttons}\n\n${about || (plans ? daysText(globalThis.kierDb, ...(days || [today(), today()])) : vault + calendar)}${earlier}${who()}` },
-      { role: 'user', content: q },
+      { role: 'system', content: `${about ? ITEM : plans ? ON_DAY : `${DAY} ${week()}`}${buttons} ${EVIDENCE_RULE}` },
+      { role: 'user', content: `${untrustedBlock({ evidence: about || (plans ? daysText(globalThis.kierDb, ...(days || [today(), today()]), { evidenceLabels: true }) : vault + calendar), history: earlier, profile: who() })}\n\nOwner question: ${q}` },
     ] }),
   })
   if (!res.ok) return { error: `local model ${res.status}` }

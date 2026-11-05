@@ -66,6 +66,7 @@ const defaults = {
   claudeCheck: false,
   // Sources the owner switched off in Setup (settings.mjs).
   off: [],
+  mcpSources: [],
   // Source restrictions also apply to nested evidence and derived summaries.
   // What each AI may read through Kier: the conversations, calendar and work the tasks come from, and every read is
   // logged. Not the clipboard, which apps you used, your browsing or your downloads; an owner who

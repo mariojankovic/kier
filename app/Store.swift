@@ -39,6 +39,10 @@ struct Card: Codable, Identifiable, Hashable {
   let open_app: String?
   var mine: Bool { from_me?.on ?? false }
   var looksDone: Bool { state == "looks_done" }
+  var looksUnneeded: Bool { state == "looks_unneeded" }
+  var needsConfirmation: Bool { looksDone || looksUnneeded }
+  var suggestionLabel: String { looksUnneeded ? "Not needed?" : "Looks done" }
+  var confirmStatus: String { looksUnneeded ? "dismissed" : "done" }
 }
 
 struct Event: Codable, Identifiable, Hashable {
@@ -134,7 +138,15 @@ struct Context: Codable {
   struct Message: Codable, Identifiable { let id: String; let sender: String?; let from_me: Bool; let ts: Int; let text: String?; let picked: Bool }
   struct Tag: Codable { let summary: String?; let card: String?; let second: Double?; let when_words: String?; let reason: String?; let url: String? }
   struct Since: Codable, Identifiable { let line: String; let url: String?; var id: String { line } }
-  struct Origin: Codable { let id: String; let source: String; let thread: String?; let sender: String?; let ts: Int; let text: String? }
+  struct Origin: Codable {
+    let id: String; let source: String; let thread: String?; let sender: String?; let ts: Int; let text: String?; let meta: String?
+    var importedMetadata: [String: String] {
+      guard let data = meta?.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+      return value.compactMapValues { $0 as? String }
+    }
+    var conversationLabel: String { source == "mcp" ? importedMetadata["channel"] ?? "" : thread ?? "" }
+    var originLabel: String { source == "mcp" ? "MCP server: " + (importedMetadata["mcpServer"] ?? "Unknown") : sourceName(source) }
+  }
   let item: Origin
   let tag: Tag?
   let messages: [Message]
@@ -151,6 +163,12 @@ struct Item: Codable, Identifiable, Hashable {
   let ts: Int
   let text: String?
   let url: String?
+  var importedMetadata: [String: String] {
+    guard let data = meta?.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+    return value.compactMapValues { $0 as? String }
+  }
+  var conversationLabel: String { source == "mcp" ? importedMetadata["channel"] ?? "" : thread ?? "" }
+  var originLabel: String { source == "mcp" ? "MCP server: " + (importedMetadata["mcpServer"] ?? "Unknown") : sourceName(source) }
   let is_task: Flag?
   let due: String?
   let amount: String?
@@ -312,6 +330,26 @@ struct ModelAction: Decodable {
   let restarting: Bool?
 }
 
+struct MCPSource: Decodable, Identifiable {
+  let id: String
+  let name: String
+  let enabled: Bool
+  let tool: String
+  let arguments: String
+  let destination: String
+}
+struct MCPTool: Decodable, Identifiable {
+  let name: String
+  let description: String
+  var id: String { name }
+}
+struct MCPReply: Decodable {
+  let ok: Bool?
+  let sources: [MCPSource]?
+  let tools: [MCPTool]?
+  let error: String?
+}
+
 struct Step: Codable, Identifiable {
   struct Action: Codable { let id: String; let label: String }
   struct Link: Codable { let label: String; let url: String }
@@ -345,7 +383,7 @@ enum Page: String, CaseIterable, Identifiable {
 
 let sourceNames = [
   "kier": "Kier", "whatsapp": "WhatsApp", "imessage": "iMessage", "calls": "Calls", "calendar": "Calendar", "browser": "Web", "downloads": "Downloads",
-  "mail": "Mail", "notifications": "Notifications", "clipboard": "Copied", "apps": "Apps", "screen": "On screen", "ai": "AI chats", "git": "Code",
+  "mcp": "MCP", "mail": "Mail", "notifications": "Notifications", "clipboard": "Copied", "apps": "Apps", "screen": "On screen", "ai": "AI chats", "git": "Code",
   "discord": "Discord", "chat": "Chats", "social": "Threads and X",
 ]
 func sourceName(_ s: String) -> String { sourceNames[s] ?? s }
@@ -611,6 +649,23 @@ final class Store {
   }
 
   func loadVault() async { if let v: Vault = await fresh("/api/vault") { vault = v } }
+
+  func mcpSources() async -> [MCPSource] {
+    let reply: MCPReply? = await get("/api/mcp-sources")
+    return reply?.sources ?? []
+  }
+
+  func mcpAction(_ action: String = "", _ body: [String: Any]) async -> MCPReply? {
+    var request = daemonRequest(URL(string: base + "/api/mcp-sources" + action)!)
+    request.httpMethod = "POST"
+    request.timeoutInterval = 40
+    request.setValue("application/json", forHTTPHeaderField: "content-type")
+    request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    guard let (data, _) = try? await daemonClient.data(for: request) else { return nil }
+    let reply = try? JSONDecoder().decode(MCPReply.self, from: data)
+    if reply?.ok == true { await loadBrief() }
+    return reply
+  }
 
   func loadSetup() async {
     let s: [String: [Step]]? = await fresh("/api/setup")

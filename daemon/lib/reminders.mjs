@@ -1,5 +1,5 @@
-// Original Apple reminders stay open until the owner confirms or a trusted sent message
-// shows completion. Legacy owner-evidence may be Git and cannot authorize write-back. Model verdicts and other people's claims remain suggestions in Kier.
+// Original Apple reminders stay open until the owner confirms in Kier or Reminders.
+// Imported messages and model verdicts remain suggestions, even with owner authorship.
 import { addItems, now } from './db.mjs'
 import { plusDays, today } from './tasks.mjs'
 
@@ -25,7 +25,7 @@ export function syncReminders(db, list) {
     // Ticked off there, and not put back here since: done. Put back after it was ticked off: it opens there again.
     const s = state.get(id(r))
     if (r.done && s?.status !== 'dismissed'
-        && !(['done', 'handled'].includes(s?.status) && ['owner', 'owner-message', 'reminders'].includes(s?.completion_origin)) && !(s?.status === 'open' && s.changed_at >= (r.completed || 0))) {
+        && !(['done', 'handled'].includes(s?.status) && ['owner', 'reminders'].includes(s?.completion_origin)) && !(s?.status === 'open' && s.changed_at >= (r.completed || 0))) {
       set.run(id(r), 'done', now(), 'ticked off in Reminders')
     }
   }
@@ -38,7 +38,7 @@ export function syncReminders(db, list) {
     if (!seen.has(r.id)) set.run(r.id, 'dismissed', now(), 'deleted in Reminders')
   }
   const open = new Set(list.filter((r) => !r.done).map(id))
-  const close = db.prepare("select item_id from task_state where item_id like 'reminders:%' and status in ('done', 'handled') and completion_origin in ('owner', 'owner-message', 'reminders')").all()
+  const close = db.prepare("select item_id from task_state where item_id like 'reminders:%' and status in ('done', 'handled') and completion_origin in ('owner', 'reminders')").all()
     .map((r) => r.item_id).filter((x) => open.has(x))
   const putBack = db.prepare("select item_id, changed_at from task_state where item_id like 'reminders:%' and status = 'open'").all()
   const reopen = putBack.filter((p) => list.some((r) => r.done && id(r) === p.item_id && p.changed_at >= (r.completed || 0))).map((p) => p.item_id)

@@ -1,29 +1,45 @@
-// A separate small process owns the worker group. fd 3 closes even if the daemon is
-// killed with SIGKILL, so cleanup does not depend on JavaScript/Python exit hooks.
+// The owner pipe closes even on daemon SIGKILL. This supervisor owns cleanup,
+// including new-session descendants, without blocking the daemon thread.
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { WorkerTree } from './worker-tree.mjs'
 const [command, ...args] = process.argv.slice(2)
-const worker = spawn(command, args, { env: process.env, stdio: 'inherit', detached: true })
-let stopping = false
-const killGroup = signal => { try { process.kill(-worker.pid, signal) } catch {} }
-function stop(signal = 'SIGTERM') {
+const tag = randomUUID()
+const worker = spawn(command, args, { env: { ...process.env, KIER_WORKER_TAG: tag }, stdio: 'inherit', detached: true })
+const tree = new WorkerTree(worker.pid, tag)
+let stopping = false, scanning = false, terminationSignal = null
+const poll = setInterval(async () => {
+  if (scanning || stopping) return
+  scanning = true
+  try { await tree.scan() } catch {} finally { scanning = false }
+}, 250)
+async function stop(code = 0, signal = null) {
+  // A cancellation arriving during normal-exit cleanup still wins over success.
+  terminationSignal ??= signal
   if (stopping) return
   stopping = true
-  killGroup('SIGTERM')
-  setTimeout(() => {
-    killGroup('SIGKILL')
-    process.removeAllListeners(signal)
-    process.kill(process.pid, signal)
-  }, 1000)
+  clearInterval(poll)
+  await tree.signal('SIGTERM')
+  await new Promise(r => setTimeout(r, 1000))
+  // Rescan during escalation to catch children started while handling SIGTERM.
+  for (let i = 0; i < 3; i++) {
+    await tree.signal('SIGKILL')
+    await new Promise(r => setTimeout(r, 50))
+  }
+  if (terminationSignal) {
+    process.removeAllListeners(terminationSignal)
+    process.kill(process.pid, terminationSignal)
+    return
+  }
+  process.exit(code)
 }
 const owner = createReadStream(null, { fd: 3 })
 owner.on('data', () => {})
-owner.on('end', () => stop())
-owner.on('error', () => stop())
-for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => stop(signal))
-process.on('exit', () => killGroup('SIGKILL'))
-worker.on('error', () => process.exit(1))
-worker.on('exit', code => {
-  if (!stopping) process.exit(code ?? 1)
-  // Keep the grace timer: descendants may still be alive after the leader exits.
-})
+owner.on('end', () => { void stop(1, 'SIGTERM') })
+owner.on('error', () => { void stop(1, 'SIGTERM') })
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { void stop(1, signal) })
+process.on('exit', () => { try { process.kill(-worker.pid, 'SIGKILL') } catch {} })
+worker.on('error', () => { void stop(1) })
+// Normal leader exit also cleans up detached children before the guard exits.
+worker.on('exit', (code, signal) => { void stop(code ?? 1, signal) })

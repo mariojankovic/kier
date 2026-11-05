@@ -38,13 +38,13 @@ test('startup repairs legacy rows and cached text once, with an idempotent migra
   const snapshot = JSON.stringify(db.prepare('select * from items order by id').all())
   assert.ok(!snapshot.includes(token))
   assert.ok(!JSON.stringify(db.prepare('select * from chats').all()).includes(token))
-  assert.equal(db.prepare('select count(*) n from migrations').get().n, 1)
-  const at = db.prepare('select at from migrations').get().at
+  assert.equal(db.prepare("select count(*) n from migrations where id = 'redact-persisted-content-v1'").get().n, 1)
+  const at = db.prepare("select at from migrations where id = 'redact-persisted-content-v1'").get().at
   db.close()
   db = open(path)
   try {
     assert.equal(JSON.stringify(db.prepare('select * from items order by id').all()), snapshot)
-    assert.equal(db.prepare('select at from migrations').get().at, at)
+    assert.equal(db.prepare("select at from migrations where id = 'redact-persisted-content-v1'").get().at, at)
   } finally { db.close() }
 })
 test('the repair keeps search fingerprints of unchanged messages and drops only redacted ones', () => {

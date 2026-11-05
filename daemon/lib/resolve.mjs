@@ -1,3 +1,5 @@
+import { authoredText, matchesCompletedTask } from './completion-evidence.mjs'
+import { evidenceLine, ownerAuthored, evidenceRecord, EVIDENCE_RULE, untrustedBlock, ownerCreated } from './evidence-trust.mjs'
 import { parseModelJSON } from './errors.mjs'
 import { localAuthorization, readScope } from './authorization.mjs'
 import { callIntent } from './callbacks.mjs'
@@ -170,14 +172,14 @@ export async function describe(db, lines) {
 // list are other reminders, not a chat.
 const NO_CHAT = new Set(['ai', 'reminders', 'kier'])
 
-export function evidence(db, task, auth = localAuthorization()) {
+export function evidence(db, task, auth = localAuthorization(), { evidenceLabels = false } = {}) {
   db = readScope(db, auth)
   const until = Math.min(now(), task.ts + WINDOW)
   // Later, or the same minute but stored after it (Discord gives only the minute; tasks.mjs `replied`).
   const rid = db.prepare('select rowid from items where id = ?').get(task.id)?.rowid ?? Number.MAX_SAFE_INTEGER
-  const chat = NO_CHAT.has(task.source) ? [] : db.prepare(`select sender, from_me, ts, text, url from items where source = ? and thread = ?
-    and (ts > ? or (ts = ? and rowid > ?)) and ts <= ? order by ts, rowid limit 120`).all(task.source, task.thread, task.ts, task.ts, rid, until).filter(sameConversation(task)).slice(0, 12)
-    .map((c) => ({ kind: 'chat', owner: c.from_me === 1, ts: c.ts, line: `[chat, ${clock(c.ts)}] ${c.from_me ? N : c.sender}: ${String(c.text || '').replace(/\s+/g, ' ').slice(0, 200)}` }))
+  const chat = NO_CHAT.has(task.source) ? [] : db.prepare(`select * from items where source = ? and thread = ?
+    and (ts > ? or (ts = ? and rowid > ?)) and ts <= ? order by ts, rowid limit 120`).all(task.source, task.thread, task.ts, task.ts, rid, until).filter(sameConversation(task)).slice(0, 12).map(c => ({ ...c, text: authoredText(c) }))
+    .map((c) => ({ kind: 'chat', record: evidenceRecord(c), text: c.text, owner: ownerAuthored(c), ts: c.ts, line: evidenceLabels ? evidenceLine(c, `[chat, ${clock(c.ts)}] ${String(c.text || '').slice(0, 200)}`) : `[chat, ${clock(c.ts)}] ${c.from_me ? N : c.sender}: ${String(c.text || '').replace(/\s+/g, ' ').slice(0, 200)}` }))
   // The words of the task and of the chat that led to it: a summary can be wrong, the conversation isn't.
   const before = NO_CHAT.has(task.source) ? [] : contextFor(db, burstOf(db, task).start, BEFORE).map((c) => c.text)
   const want = words(`${task.summary} ${task.text} ${before.join(' ')}`)
@@ -195,7 +197,7 @@ export function evidence(db, task, auth = localAuthorization()) {
   const matched = all.filter((w) => w.score > 0).sort((a, b) => b.score - a.score || a.ts - b.ts).slice(0, 8)
   const work = [...new Set([...soon, ...matched])].sort((a, b) => a.ts - b.ts)
     .map((w) => ({
-      kind: w.source, owner: false, ts: w.ts, url: w.url, shared: w.score,
+      kind: w.source, record: evidenceRecord({ ...w, from_me: 0 }), owner: false, ts: w.ts, url: w.url, shared: w.score,
       line: w.source === 'git' ? `[commit in ${w.thread}, ${clock(w.ts)}] ${w.text}${prOf(w)}`
         : w.source === 'browser' ? `[pull request page ${N} opened, ${clock(w.ts)}] ${w.text}`
         : w.source === 'notifications' ? `[${w.thread} said, ${clock(w.ts)}] ${w.text}` : session(w),
@@ -203,29 +205,31 @@ export function evidence(db, task, auth = localAuthorization()) {
   // Payment confirmation may arrive through a different conversation. Include candidate
   // confirmations and let the done-check determine whether they concern this payment.
   const paid = PAYING.test(task.summary || '') || task.card === 'payment' || task.amount
-    ? db.prepare(`select source, thread, sender, from_me, ts, text from items where source in ('whatsapp', 'imessage', 'discord', 'chat', 'mail', 'notifications')
+    ? db.prepare(`select * from items where source in ('whatsapp', 'imessage', 'discord', 'chat', 'mail', 'notifications')
         and ts > ? and ts <= ? and not (source = ? and thread = ?) order by ts desc limit 400`).all(task.ts, until, task.source, task.thread)
-        .filter((m) => PAID.test(m.text || '')).slice(0, 6).reverse()
-        .map((m) => ({ kind: 'chat', owner: m.from_me === 1, ts: m.ts, line: `[${m.source === 'mail' ? 'email' : m.source}, ${m.thread}, ${clock(m.ts)}] ${m.from_me ? N : m.sender}: ${String(m.text || '').replace(/\s+/g, ' ').slice(0, 200)}` }))
+        .map(m => ({ ...m, text: authoredText(m) })).filter((m) => PAID.test(m.text || '')).slice(0, 6).reverse()
+        .map((m) => ({ kind: 'chat', record: evidenceRecord(m), text: m.text, owner: ownerAuthored(m), ts: m.ts, line: evidenceLabels ? evidenceLine(m, `[${m.source === 'mail' ? 'email' : m.source}, ${m.thread}, ${clock(m.ts)}] ${String(m.text || '').slice(0, 200)}`) : `[${m.source === 'mail' ? 'email' : m.source}, ${m.thread}, ${clock(m.ts)}] ${m.from_me ? N : m.sender}: ${String(m.text || '').replace(/\s+/g, ' ').slice(0, 200)}` }))
     : []
   // Sent mail can settle work requested in a different chat or in Ask. Keep
   // recipients in the evidence so the model must match both person and action.
-  const sentMail = db.prepare(`select thread, ts, text, meta from items where source = 'mail' and from_me = 1
+  const sentMail = db.prepare(`select * from items where source = 'mail' and from_me = 1
     and ts > ? and ts <= ? and not (source = ? and thread = ?) order by ts desc limit 200`)
     .all(task.ts, until, task.source, task.thread)
-    .filter(m => [...words(`${m.thread} ${m.text} ${m.meta || ''}`)].some(w => want.has(w))).slice(0, 8).reverse()
+    .map(m => ({ ...m, text: authoredText(m) })).filter(m => [...words(m.text)].some(w => want.has(w))).slice(0, 8).reverse()
     .map(m => {
       const meta = metaOf(m)
       const to = (meta.to || []).map(a => typeof a === 'string' ? a : a.name || a.email || '').join(', ')
-      return { kind: 'chat', owner: true, ts: m.ts,
-        line: `[email to ${to}, ${m.thread}, ${clock(m.ts)}] ${N}: ${String(m.text || '').replace(/\s+/g, ' ').slice(0, 400)}` }
+      return { kind: 'chat', record: evidenceRecord(m), text: m.text, owner: ownerAuthored(m), ts: m.ts,
+        line: evidenceLabels ? evidenceLine(m, `[email to ${to}, ${m.thread}, ${clock(m.ts)}] ${String(m.text || '').slice(0, 400)}`) : `[email to ${to}, ${m.thread}, ${clock(m.ts)}] ${N}: ${String(m.text || '').replace(/\s+/g, ' ').slice(0, 400)}` }
     })
   // What you told Kier about it in its chat ("I gave Claude this", "done"): your words, so the same rules apply.
   const told = db.prepare('select ts, q from chats where key = ? order by ts').all(task.id)
-    .map((c) => ({ kind: 'kier', owner: true, ts: c.ts, line: `[${N} told Kier about it, ${clock(c.ts)}] ${N}: ${String(c.q).replace(/\s+/g, ' ').slice(0, 300)}` }))
+    .map((c) => ({ kind: 'kier', record: evidenceRecord({ source: 'kier', from_me: 1, ts: c.ts, text: c.q }), text: authoredText({ text: c.q }), owner: true, ts: c.ts, line: `[${N} told Kier about it, ${clock(c.ts)}] ${N}: ${String(c.q).replace(/\s+/g, ' ').slice(0, 300)}` }))
   const screen = onScreen(db, task, until)
   const links = github([task.text, ...before, ...chat.map((c) => c.line)].join(' '))
-  return [...links, ...chat, ...paid, ...sentMail, ...told, ...screen, ...work]
+  return [...links, ...chat, ...paid, ...sentMail, ...told, ...screen, ...work].map(e => ({ ...e,
+    line: !evidenceLabels || e.line.startsWith('[source=') ? e.line : evidenceLine({ source: e.kind === 'chat' ? 'screen' : e.kind, from_me: e.owner === true }, e.line),
+  }))
 }
 
 // An AI session as a line: what it's about, what you last asked it, and where it is now.
@@ -247,18 +251,15 @@ First say in your own words what the task really is, from the chat. Then judge. 
 {"task": "the real task in at most 12 words", "done": true or false, "not_mine": true or false, "not_a_task": true or false, "line": number of the line that shows it or 0, "why": "at most 12 words"}`
 
 export async function judge(db, task, lines) {
-  const who = task.from_me ? `${N} promised` : `${task.sender} asked ${N}`
   const before = NO_CHAT.has(task.source) ? [] : contextFor(db, burstOf(db, task).start, BEFORE)
-  // Without the summary the model drifts to whatever else the chat mentions, so it stays, marked as a guess.
-  const known = slice({ people: [task.sender, ...before.map((c) => c.from)], group: metaOf(task).group ? task.thread : null })
-  const user = `Task (an automatic summary, may be wrong): ${task.summary}\n` + (known ? `${known}\n` : '') +
-    (before.length ? `Before it, in the same chat:\n${before.map((c) => `[${c.time}] ${c.from}: ${String(c.text).replace(/\s+/g, ' ').slice(0, 200)}`).join('\n')}\n` : '') +
-    `From: ${who}, in ${metaOf(task).group ? 'a group chat' : task.thread} (${task.source}), ${clock(task.ts)}: "${ends(String(task.text || '').replace(/\s+/g, ' '))}"\n\nAfter it:\n${lines.map((l, i) => `${i + 1}. ${l.line}`).join('\n')}`
+  const user = untrustedBlock({ summaryGuess: task.summary, task: evidenceRecord(task),
+    before: before.map(c => ({ ...c.trust, sender: c.from, time: c.time, text: c.text })),
+    after: lines.map((l, i) => ({ number: i + 1, ...(l.record || evidenceRecord({ source: l.kind || 'unknown', from_me: 0 }, l.line)) })) })
   // Room for pull request descriptions on the commit lines.
   const res = await modelFetch('/api/chat', {
     method: 'POST', signal: AbortSignal.timeout(120000),
     body: JSON.stringify({ model: config.model, stream: false, think: false, keep_alive: config.keepAlive, options: { temperature: 0, num_ctx: 8192 },
-      messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }] }),
+      messages: [{ role: 'system', content: SYSTEM + '\n' + EVIDENCE_RULE }, { role: 'user', content: user }] }),
   })
   if (!res.ok) throw Error(`ollama ${res.status}`)
   const out = parseModelJSON((await res.json()).message.content.match(/\{[\s\S]*\}/)?.[0] ?? 'null')
@@ -277,13 +278,13 @@ const QUICK = 30 * 60
 const NOW = wordRegex('now')
 const NOW_WINDOW = 15 * 60
 // Words that report something finished, in Croatian and English.
-const DONE_WORDS = wordRegex('done')
+
 
 export async function ask(system, user) {
   const res = await modelFetch('/api/chat', {
     method: 'POST', signal: AbortSignal.timeout(120000),
     body: JSON.stringify({ model: config.model, stream: false, think: false, keep_alive: config.keepAlive, options: { temperature: 0, num_ctx: 4096 },
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      messages: [{ role: 'system', content: system + '\n' + EVIDENCE_RULE }, { role: 'user', content: untrustedBlock({ evidence: user }) }] }),
   })
   if (!res.ok) return null
   return parseModelJSON((await res.json()).message.content.match(/\{[\s\S]*\}/)?.[0] ?? 'null')
@@ -320,11 +321,11 @@ export async function hint(db, task) {
 // or a model's claim. Unknown and model-only evidence needs the owner's confirmation.
 export function recordCompletion(db, task, proof, reason, url = null) {
   // Git author text is forgeable. Only existing trusted message paths can authorize completion.
-  const origin = proof?.owner === true && ['chat', 'kier'].includes(proof.kind) ? 'owner-message' : null
-  const status = task.source === 'reminders' && !origin ? 'looks_done' : 'handled'
+  const origin = proof?.owner === true && ['chat', 'kier'].includes(proof.kind) && matchesCompletedTask(task, proof.text, proof.record?.recipients?.to || []) ? 'owner-message' : null
+  const status = !ownerCreated(task) && origin ? 'handled' : 'looks_done'
   return db.prepare(`insert into task_state (item_id, status, changed_at, reason, url, completion_origin)
     values (?, ?, ?, ?, ?, ?) on conflict(item_id) do nothing`)
-    .run(task.id, status, now(), reason, url, origin)
+    .run(task.id, status, now(), reason, url, status === 'looks_done' ? null : origin)
 }
 
 // A few open tasks at a time, each at most every six hours, so it runs in Kier's quiet moments.
@@ -347,8 +348,9 @@ export async function resolvePending(db, limit = 4, { answered = false, now: ask
   if (!open.length || !(await ollamaUp())) return {}
   const mark = db.prepare('update tags set checked_at = ? where item_id = ?')
   const setHint = db.prepare('update tags set hint = ?, hint_url = ? where item_id = ?')
-  const dismiss = db.prepare(`insert into task_state (item_id, status, changed_at, reason) values (?, 'dismissed', ?, ?)
-    on conflict(item_id) do nothing`)
+  const dismiss = (task, reason) => db.prepare(`insert into task_state (item_id, status, changed_at, reason)
+    values (?, ?, ?, ?) on conflict(item_id) do nothing`)
+    .run(task.id, ownerCreated(task) ? 'looks_unneeded' : 'dismissed', now(), reason)
   let resolved = 0
   for (const t of open) {
     // Your own promise to publish something can be checked where you publish it.
@@ -357,24 +359,22 @@ export async function resolvePending(db, limit = 4, { answered = false, now: ask
     const lines = [...((await describe(db, first).catch(() => 0)) ? evidence(db, t) : first), ...(t.from_me ? await newSince(db, t).catch(() => []) : [])]
     const verdict = lines.length ? await judge(db, t, lines).catch(() => null) : null
     let proof = verdict?.done === true ? lines[Number(verdict.line) - 1] : null
-    // An acknowledgment or promise to start work is not evidence that the work is complete.
-    if (proof && proof.owner === true && ['chat', 'kier'].includes(proof.kind) && !DONE_WORDS.test(proof.line)) proof = null
-    // Only consider nearby replies or replies that share the task’s subject.
-    if (proof && proof.owner === true && ['chat', 'kier'].includes(proof.kind) && !aboutThis(t, proof)) proof = null
+    // A model verdict can suggest completion, but only the deterministic action
+    // and object check in recordCompletion can settle Kier's own card.
     // A reply is answered in its conversation; an unrelated commit is never an answer.
     if (proof && t.card === 'reply' && proof.kind === 'git') proof = null
     const elsewhere = verdict?.not_mine === true ? lines[Number(verdict.line) - 1] : null
     // An example or a hypothetical the tagger took at its word (such as an imagined course payment).
     if (verdict?.not_a_task === true && !proof && !elsewhere) {
-      dismiss.run(t.id, now(), `Not a task: ${String(verdict.why || 'an example, not something to do').slice(0, 200)}`)
+      dismiss(t, `Not a task: ${String(verdict.why || 'an example, not something to do').slice(0, 200)}`)
       resolved++
     } else if (elsewhere) {
-      dismiss.run(t.id, now(), `Not yours: ${elsewhere.line.replace(/^\[([^\]]+)\]\s*/, '$1: ')}`.slice(0, 300))
+      dismiss(t, `Not yours: ${elsewhere.line.replace(/^\[([^\]]+)\]\s*/, '$1: ')}`.slice(0, 300))
       resolved++
     } else if (proof) {
       recordCompletion(db, t, proof, `Looks done: ${proof.line.replace(/^\[([^\]]+)\]\s*/, '$1: ')}`.slice(0, 300), proof.url || null)
       resolved++
-    } else if (t.source === 'reminders' && verdict?.done === true) {
+    } else if (ownerCreated(t) && verdict?.done === true) {
       recordCompletion(db, t, null, `Looks done: ${String(verdict.why || 'Model verdict without verified evidence').slice(0, 200)}`)
       resolved++
     } else {
@@ -452,20 +452,20 @@ export async function aboutItem(db, id, auth = localAuthorization()) {
   if (!t) return ''
   const meta = metaOf(t)
   const where = t.source === 'ai' ? `${t.sender} session "${t.thread}"` : meta.group ? 'a group chat' : t.thread
-  const before = t.source === 'ai' ? [meta.request && `${N}: ${meta.request}`, meta.said && `${t.sender}: ${meta.said}`].filter(Boolean)
-    : contextFor(db, burstOf(db, t).start, BEFORE).map((c) => `[${c.time}] ${c.from}: ${String(c.text).replace(/\s+/g, ' ').slice(0, 240)}`)
-  const since = evidence(db, { ...t, text: t.said }, auth).map((e) => e.line)
+  const before = t.source === 'ai' ? [meta.request && evidenceLine({ ...t, from_me: 1 }, meta.request), meta.said && evidenceLine({ ...t, from_me: 0 }, meta.said)].filter(Boolean)
+    : contextFor(db, burstOf(db, t).start, BEFORE, { evidenceLabels: true }).map(c => c.evidence)
+  const since = evidence(db, { ...t, text: t.said }, auth, { evidenceLabels: true }).map((e) => e.line)
   const later = laterInChat(db, t, since, auth)
   const also = alsoMentions(db, t, [...since, ...later], auth)
   const place = t.source === 'ai' ? '' : await whereItGoes(db, t, auth).catch(() => '')
   return [
-    `The item: ${t.summary || t.text}${t.status ? ` (marked ${t.status}${t.reason ? `: ${t.reason}` : ''})` : ''}`,
-    `From ${t.from_me ? N : t.sender}, in ${where} (${LABEL[t.source] || t.source}), ${clock(t.ts)}: "${String(t.said || '').replace(/\s+/g, ' ').slice(0, 400)}"`,
+    evidenceLine(t, `The item: ${t.summary || t.text}${t.status ? ` (marked ${t.status}${t.reason ? `: ${t.reason}` : ''})` : ''}`),
+    evidenceLine(t, `In ${where} (${LABEL[t.source] || t.source}), ${clock(t.ts)}: ${String(t.said || '').slice(0, 400)}`),
     before.length ? `Before it:\n${before.join('\n')}` : '',
     `What ${N}'s vault shows since then:\n${since.length ? since.map((l) => `- ${l}`).join('\n') : '- nothing yet'}`,
     later.length ? `Later in the same chat, up to now (${N}'s own messages, and any with the same words):\n${later.map((l) => `- ${l}`).join('\n')}` : '',
     also.length ? `Other things in the vault since then with the same words:\n${also.map((l) => `- ${l}`).join('\n')}` : '',
-    place,
+    place ? evidenceLine({ source: 'browser/web' }, place) : '',
   ].filter(Boolean).join('\n\n')
 }
 
@@ -474,12 +474,12 @@ function laterInChat(db, t, seen, auth) {
   db = readScope(db, auth)
   if (t.source === 'ai') return []
   const keys = [...new Set(String(t.summary || '').toLowerCase().match(/[a-zčćšžđ]{4,}/g) || [])].filter((w) => !STOP.has(w) && w !== N.toLowerCase())
-  return db.prepare('select sender, from_me, ts, text from items where source = ? and thread = ? and ts > ? order by ts desc limit 400')
+  return db.prepare('select * from items where source = ? and thread = ? and ts > ? order by ts desc limit 400')
     .all(t.source, t.thread, t.ts).filter(sameConversation(t))
     // Match conversational answers by context when their words differ from the question.
     .filter((r) => r.from_me || (!t.from_me && r.sender === t.sender) || keys.some((k) => String(r.text || '').toLowerCase().includes(k)))
     .slice(0, 15).reverse()
-    .map((r) => `[chat, ${clock(r.ts)}] ${r.from_me ? N : r.sender}: ${String(r.text || '').replace(/\s+/g, ' ').slice(0, 200)}`)
+    .map((r) => evidenceLine(r, `[chat, ${clock(r.ts)}] ${String(r.text || '').slice(0, 200)}`))
     .filter((l) => !seen.includes(l))
 }
 
@@ -489,9 +489,9 @@ function alsoMentions(db, t, seen, auth) {
   const keys = [...new Set(String(t.summary || '').toLowerCase().match(/[a-zčćšžđ]{4,}/g) || [])].filter((w) => !STOP.has(w) && w !== N.toLowerCase()).slice(0, 6)
   if (!keys.length) return []
   const need = Math.min(2, keys.length)
-  return db.prepare("select source, thread, sender, ts, text, url from items where ts > ? and id != ? and source != 'clipboard' order by ts limit 5000").all(t.ts, t.id)
+  return db.prepare("select * from items where ts > ? and id != ? and source != 'clipboard' order by ts limit 5000").all(t.ts, t.id)
     .map((r) => ({ r, n: keys.filter((k) => `${r.text} ${r.thread} ${r.url || ''}`.toLowerCase().includes(k)).length }))
     .filter((x) => x.n >= need).sort((a, b) => b.n - a.n || b.r.ts - a.r.ts).slice(0, 8)
-    .map(({ r }) => `[${LABEL[r.source] || r.source}${r.thread && r.source !== 'browser' ? ` ${r.thread}` : ''}, ${clock(r.ts)}] ${r.sender && !['browser', 'git'].includes(r.source) ? `${r.sender}: ` : ''}${String(r.text || '').replace(/\s+/g, ' ').slice(0, 200)}${r.url && r.source === 'browser' ? ` (${r.url})` : ''}`)
+    .map(({ r }) => evidenceLine(r, `${r.thread || ''}, ${clock(r.ts)}: ${String(r.text || '').slice(0, 200)}${r.url ? ` (${r.url})` : ''}`))
     .filter((l) => !seen.some((s) => s.includes(l.slice(-60))))
 }

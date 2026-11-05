@@ -1,3 +1,4 @@
+import { newlyWritten } from '../lib/completion-evidence.mjs'
 // Local mail only. Bounded pages and body reads run in the collection child.
 import { createHash } from 'node:crypto'
 import { closeSync, existsSync, openSync, opendirSync, readdirSync, readSync, realpathSync, statSync } from 'node:fs'
@@ -131,8 +132,7 @@ export function plainMail(raw, depth = 0) {
     decoded = Buffer.from(body.replace(/=\r?\n/g, '').replace(/=([\da-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))), 'latin1').toString('utf8')
   }
   // Quoted history and signatures are not the sender's new evidence.
-  const snippet = decoded.split(/\r?\n/).filter(line => !/^\s*>/.test(line)).join('\n')
-    .split(/\n(?:On .+wrote:|From:|--\s*$)/m)[0].trim().slice(0, 2000)
+  const snippet = newlyWritten(decoded).slice(0, 2000)
   return { headers, snippet }
 }
 
@@ -206,7 +206,8 @@ function appleRows(db, ids, root) {
   const rows = db.prepare(`select m.rowid pk, s.subject, a.address senderAddress,
     ${field(a, 'a', ['comment', 'name'], "''")} senderName,
     coalesce(nullif(${field(m, 'm', ['date_sent'])}, 0), ${field(m, 'm', ['date_received'])}) date,
-    coalesce(${linkedID}, ${field(m, 'm', ['message_id', 'messageId'])}) messageId,
+    -- Apple Mail keeps some ids as 64-bit integers, past what a JavaScript number holds: read them as text.
+    cast(coalesce(${linkedID}, ${field(m, 'm', ['message_id', 'messageId'])}) as text) messageId,
     ${mailbox} mailbox, ${field(boxes, 'b', ['role', 'name'], "''")} role
     from messages m left join subjects s on s.rowid = m.subject
     left join addresses a on a.rowid = m.sender left join mailboxes b on b.rowid = m.mailbox ${idJoin}
@@ -267,7 +268,7 @@ export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now
       for (const row of rows) {
         const ts = mailDate(row.date)
         if (ts < at - config.backfillDays * 86400 || ts > at + 86400) continue
-        const fromMe = row.sent === true || Number(row.sent) === 1 || row.from.some(a => owners.has(a.email))
+        const fromMe = row.sent === true || Number(row.sent) === 1
         const from = row.from[0]
         if (!from?.email || !fromMe && automated(from.email, row.subject, row.snippet, row.list)) continue
         const other = fromMe ? display(row.to.find(a => !owners.has(a.email))) : display(from)
@@ -275,11 +276,11 @@ export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now
         const thread = conversation(row.subject, other)
         if (config.blockedChats.includes(thread)) continue
         const mid = messageID(row.messageId)
-        // A canonical Message-ID produces the same primary key in both clients.
+        // Message-ID is only a correlation hint. The store also keys each local copy.
         const id = `mail:${hash(mid ? `message:${mid}` : `${key}:${row.pk}`)}`
         items.push({ id, source, thread, sender: fromMe ? config.me : display(from), fromMe, ts,
           text: [String(row.subject || '').slice(0, 500), String(row.snippet || '').slice(0, 2000)].filter(Boolean).join('\n'),
-          meta: { client: store.client, messageId: mid, to: row.to, cc: row.cc, mailbox: row.mailbox || '',
+          meta: { subject: String(row.subject || '').slice(0, 500), body: String(row.snippet || '').slice(0, 2000), bodyKind: store.client === 'apple-mail' ? 'plain' : 'preview', client: store.client, copyKey: `${key}:${row.pk}`, account: key, ownerSent: fromMe, messageId: mid, to: row.to, cc: row.cc, mailbox: row.mailbox || '',
             from: row.from, group: row.to.length + row.cc.length > 1, ...(row.conversationPk != null && { conversationPk: row.conversationPk }) } })
       }
       added += addItems(db, items)

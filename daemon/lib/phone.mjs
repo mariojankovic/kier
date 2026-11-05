@@ -1,3 +1,4 @@
+import { canCompleteReminder } from './completion-evidence.mjs'
 // When enabled, write plans and dated tasks to Apple Calendar and Reminders. Account sync
 // can carry them to other devices. Keep completion and deletion state in step.
 import { myReminders, phoneCalendar, phoneReminders } from './settings.mjs'
@@ -26,13 +27,13 @@ export function phoneItems(db, { decisionAvailable = decisionInstalled() } = {})
     || t.second != null || !decisionAvailable
   const eligible = (t) => {
     if (t.source === 'reminders') return false
-    const open = ['open', 'overdue'].includes(t.state) && !t.maybe
+    const open = ['open', 'overdue', 'looks_done', 'looks_unneeded'].includes(t.state) && !t.maybe
     if (t.source === 'kier') return open || finished(t)
     return t.due && t.due <= until && ((open && t.due >= t0) || (finished(t) && t.due >= plusDays(t0, -1)))
   }
   const dated = tasks(db).filter(canWrite).filter(eligible)
     .filter((t) => !seen.has(t.summary) && seen.add(t.summary)).map((t) => ({
-      id: t.id, kind: 'reminder', title: t.summary, due: t.due || null, time: clockOf(t), ...(finished(t) && { done: true }),
+      id: t.id, kind: 'reminder', title: t.summary, due: t.due || null, time: clockOf(t), ...(finished(t) && canCompleteReminder(t) && { done: true }),
       notes: `${t.source === 'kier' ? 'You asked Kier to remind you' : t.from_me ? 'You promised' : `${t.sender} asked you`}${SOURCE[t.source] ? `, on ${SOURCE[t.source]}` : ''}. Added by Kier.`,
     }))
   const calendar = phoneCalendar(), reminders = phoneReminders()

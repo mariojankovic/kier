@@ -22,10 +22,10 @@ const tag = db.prepare("insert into tags (item_id, is_task, summary, card, model
 tag.run('q1', t)
 tag.run('q2', t)
 
-test('an answer in the same minute, after the question, settles it', () => {
+test('an answer in the same minute, after the question, suggests completion', () => {
   const card = tasks(db).find((c) => c.id === 'q1')
-  assert.equal(card.state, 'handled')
-  assert.equal(card.reason, 'you replied in this chat')
+  assert.equal(card.state, 'looks_done')
+  assert.equal(card.reason, 'Looks done: you replied in this chat')
 })
 
 test('a line of yours from that minute but before the question does not', () => {

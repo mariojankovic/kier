@@ -1,3 +1,4 @@
+import { evidenceTrust, ownerAuthored, EVIDENCE_RULE } from './evidence-trust.mjs'
 import { childDiagnostics } from './errors.mjs'
 import { sidecarFetch, sockets } from './sidecar-client.mjs'
 import { sidecarToken } from './sidecar-auth.mjs'
@@ -90,14 +91,14 @@ export function decisionMessage(i) {
     // Group names are labels, not topics; see prompt() in tagger.mjs.
     : meta.group ? 'a group chat' : `chat with ${i.thread}`
   const context = (Array.isArray(i.context) ? i.context : []).slice(-8).map(c => ({
-    time: String(c.time || ''), from: String(c.from || ''), text: String(c.text || '').slice(0, 300),
+    trust: c.trust || evidenceTrust({ source: i.source }), time: String(c.time || ''), from: String(c.from || ''), text: String(c.text || '').slice(0, 300),
   })).filter(c => c.text)
-  return { source: label[i.source] || i.source, where, sent: sent(i.ts), from: i.sender, from_me: !!i.from_me, text: i.text,
+  return { trust: evidenceTrust(i), source: label[i.source] || i.source, where, sent: sent(i.ts), from: i.sender, from_me: ownerAuthored(i), text: i.text,
     ...(context.length && { context }) }
 }
 
 // What kind of card a task is. Payments and promises are plain facts; d1 tells the rest apart.
-const CARD = { card: { type: 'choice', instructions: `What does ${config.me} have to do because of the message to judge?`, criteria: {
+const CARD = { card: { type: 'choice', instructions: `${EVIDENCE_RULE} What does ${config.me} have to do because of the message to judge?`, criteria: {
   appointment: 'Be somewhere, or join a call or meeting, at a set time',
   reply: 'Answer a question or give a decision someone is waiting for',
   todo: 'Do, send, fix, check or buy something',
@@ -110,7 +111,7 @@ export async function cards(items) {
   const answers = open.length ? await ask(open.map((i) => {
     const m = decisionMessage(i)
     return { source: m.source, chat: m.where, sent: m.sent, ...(m.context && { earlier_messages: m.context }),
-      message_to_judge: { from: m.from, text: m.text } }
+      message_to_judge: { trust: m.trust, from: m.from, text: m.text } }
   }), CARD) : []
   if (open.length && !answers) return null
   const picked = new Map(open.map((i, n) => [i.id, answers[n]?.card?.choice || 'todo']))

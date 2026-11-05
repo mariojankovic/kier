@@ -7,7 +7,8 @@ import { now } from './db.mjs'
 
 export const SOURCES = [
   { id: 'whatsapp', label: 'WhatsApp' },
-  { id: 'mail', label: 'Mail', detail: 'Personal mail from Apple Mail and Spark, read locally' },
+  { id: 'mcp', label: 'MCP sources', detail: 'Only servers and read tools you explicitly enable' },
+  { id: 'mail', label: 'Mail', detail: 'Personal mail from Apple Mail, Spark and connected Gmail' },
   { id: 'imessage', label: 'Messages', detail: 'iMessage and SMS' },
   { id: 'discord', label: 'Discord', detail: 'Read from its window through Accessibility, in front or not' },
   { id: 'notifications', label: 'Notifications', detail: 'Mail and other apps, from Notification Center' },
@@ -29,7 +30,7 @@ export const isOff = (source) => off().includes(source)
 export const offClause = (column = 'i.source') => (off().length ? `and ${column} not in (${off().map((s) => `'${s.replace(/'/g, '')}'`).join(', ')})` : '')
 
 // Writes only what changed into config.json, keeping everything else the owner set there.
-function save(patch) {
+export function save(patch) {
   const file = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : {}
   const temporary = `${configPath}.${process.pid}.tmp`
   try {

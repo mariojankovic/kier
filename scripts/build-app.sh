@@ -44,6 +44,14 @@ for s in "16" "32" "128" "256" "512"; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Kier.icns"
 sed -e "s#__ROOT__#$ROOT/daemon#" -e "s#__NODE__#$NODE#" app/Info.plist > "$APP/Contents/Info.plist"
+# The installed-app client ID is public configuration, never a client secret.
+KIER_GOOGLE_CLIENT_ID="${KIER_GOOGLE_CLIENT_ID:-}" python3 - "$APP/Contents/Info.plist" <<'PYTHON'
+import os, plistlib, sys
+path = sys.argv[1]
+with open(path, 'rb') as f: info = plistlib.load(f)
+info['KierGoogleClientID'] = os.environ['KIER_GOOGLE_CLIENT_ID']
+with open(path, 'wb') as f: plistlib.dump(info, f)
+PYTHON
 /usr/libexec/PlistBuddy -c "Set :SUFeedURL ${KIER_UPDATE_FEED:-https://github.com/${KIER_PUBLIC_REPO:-mariojankovic/kier}/releases/latest/download/appcast.xml}" "$APP/Contents/Info.plist"
 for part in "$FW/Versions/B/Autoupdate" "$FW/Versions/B/Updater.app" "$FW"; do codesign --force --options runtime --sign "$IDENTITY" "$part"; done
 codesign --force --options runtime --identifier com.getkier.kier --sign "$IDENTITY" "$APP"

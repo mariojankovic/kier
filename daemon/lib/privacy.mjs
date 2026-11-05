@@ -1,3 +1,4 @@
+import { stableMailIdentity } from './mail-identity.mjs'
 import { invalidateProfile } from './profile-state.mjs'
 import { createHash } from 'node:crypto'
 import { readdirSync, rmSync } from 'node:fs'
@@ -69,6 +70,12 @@ export function forgotten(db) {
 
 export function keep(item, gone) {
   if (adult(item)) return false
+  // Honor pre-isolation tombstones without ever creating new global MCP thread keys.
+  if (item.source === 'mcp') {
+    let meta = item.meta; try { if (typeof meta === 'string') meta = JSON.parse(meta) } catch {}
+    if (meta?.threadVersion === 1 && gone.has(forgetKey('thread', 'mcp', meta.channel || ''))) return false
+  }
+  if (item.source === 'mail' && stableMailIdentity(item).some(key => gone.has(forgetKey('item', key)))) return false
   return !gone.has(forgetKey('item', item.id)) && !gone.has(forgetKey('thread', item.source, item.thread ?? ''))
 }
 
@@ -92,6 +99,15 @@ export function forget(db, { id, source, thread }) {
   db.exec('begin')
   try {
     let removed
+    // Capture stable identity inside the same transaction, before metadata goes away.
+    const mail = id ? db.prepare("select * from items where source = 'mail' and id = ?").all(id)
+      : source === 'mail' ? db.prepare("select * from items where source = 'mail' and coalesce(thread, '') = ?").all(thread ?? '') : []
+    for (const row of mail) for (const key of stableMailIdentity(row)) add.run(forgetKey('item', key), 'item', at)
+    // Other copies of the same message (another client, sent and received) go too.
+    const keys = new Set(mail.flatMap(row => stableMailIdentity(row)))
+    const copies = keys.size ? db.prepare("select * from items where source = 'mail'").all()
+      .filter(row => !mail.some(m => m.id === row.id) && stableMailIdentity(row).some(k => keys.has(k))) : []
+    for (const row of copies) { add.run(forgetKey('item', row.id), 'item', at); remove(db, 'id = ?', [row.id]) }
     if (id) {
       add.run(forgetKey('item', id), 'item', at)
       removed = remove(db, 'id = ?', [id])

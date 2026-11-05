@@ -1,18 +1,22 @@
+import { mailIdentity } from './mail-identity.mjs'
+import { createHash } from 'node:crypto'
+import { externalSender, ownerAuthored, evidenceMeta } from './evidence-trust.mjs'
+import { mcpThread } from './mcp-identity.mjs'
 import { redact } from './redact.mjs'
 import { invalidateProfile } from './profile-state.mjs'
 import { permitsItem } from './app-permissions.mjs'
 import { DatabaseSync } from 'node:sqlite'
 import { chmodSync, existsSync } from 'node:fs'
-import { dbPath } from './config.mjs'
+import { config, dbPath } from './config.mjs'
 import { forgotten, keep, forgetKey } from './privacy.mjs'
 
 export function open(path = dbPath, { readOnly = false } = {}) {
   const db = new DatabaseSync(path, { readOnly })
   db.exec('pragma busy_timeout = 5000')
   let lastOff, lastDisabled
-  db.function('kier_origin_permitted', (source, thread, meta, disabled) => {
+  db.function('kier_origin_permitted', (source, thread, meta, disabled, sourceId) => {
     if (disabled !== lastOff) { lastDisabled = JSON.parse(disabled); lastOff = disabled }
-    return Number(permitsItem({ source, thread, meta }, lastDisabled))
+    return Number(permitsItem({ source, thread, meta, sourceId }, lastDisabled))
   })
   db.function('kier_forget_key', { varargs: true }, (...parts) => forgetKey(...parts))
   if (readOnly) return db
@@ -101,7 +105,13 @@ export function open(path = dbPath, { readOnly = false } = {}) {
   if (!db.prepare("select 1 from pragma_table_info('tags') where name = 'deep_at'").get()) db.exec('alter table tags add column deep_at integer')
   // a commit that may have kept a promise, shown on the card for one-click confirmation.
   if (!db.prepare("select 1 from pragma_table_info('tags') where name = 'hint'").get()) db.exec('alter table tags add column hint text; alter table tags add column hint_url text')
+  if (!db.prepare("select 1 from pragma_table_info('items') where name = 'source_id'").get()) db.exec('alter table items add column source_id text')
+  db.exec('create index if not exists items_source_id on items(source, source_id)')
   repairText(db)
+  repairMailProvenance(db)
+  repairCompletionProvenance(db)
+  repairMcpThreads(db)
+  repairImportedAuthorship(db)
   return db
 }
 
@@ -120,31 +130,35 @@ export function setCursor(db, source, value) {
 // Every source passes through here, so this is where adult content and forgotten things are dropped.
 export function addItems(db, all) {
   const gone = forgotten(db)
-  const items = all.filter((i) => permitsItem(i) && keep(i, gone)).map(redactItem)
-  const insert = db.prepare(`insert or ignore into items (id, source, thread, sender, from_me, ts, text, url, meta)
-    values (:id, :source, :thread, :sender, :from_me, :ts, :text, :url, :meta)`)
-  // The same mail may arrive from two clients. A Sent copy can establish owner
-  // authority, and a plain snippet can enrich a subject-only copy, without new cards.
-  const mergeMail = db.prepare(`update items set
-    sender = case when from_me = 0 and ? = 1 then ? else sender end,
-    from_me = max(from_me, ?),
-    meta = case when (from_me = 0 and ? = 1) or (instr(coalesce(text, ''), char(10)) = 0 and instr(?, char(10)) > 0) then ? else meta end,
-    text = case when instr(coalesce(text, ''), char(10)) = 0 and instr(?, char(10)) > 0 then ? else text end
-    where id = ? and source = 'mail'`)
+  const trusted = all.map(i => ({ ...i, fromMe: ownerAuthored(i), ...(i.source === 'mcp' && { sender: externalSender(i.sender) }) }))
+  const migrated = []
+  // Forget records keys from the stored, redacted row. An incoming item is checked in both forms: as it
+  // arrives and exactly as it would be stored, so the comparison never depends on how redaction rewrote it.
+  const items = trusted.filter(i => permitsItem(i)).map(i => {
+    if (i.source !== 'mail') return i
+    const { current, aliases } = mailIdentity(i)
+    const stored = mailIdentity(redactItem({ ...i, id: current }))
+    if ([...aliases, ...stored.aliases].some(id => gone.has(forgetKey('item', id)))) {
+      migrated.push(current)
+      return null
+    }
+    return { ...i, id: current }
+  }).filter(i => i && keep(i, gone) && keep(redactItem(i), gone)).map(redactItem)
+  const insert = db.prepare(`insert or ignore into items (id, source, thread, sender, from_me, ts, text, url, meta, source_id)
+    values (:id, :source, :thread, :sender, :from_me, :ts, :text, :url, :meta, :source_id)`)
+  // Copies are immutable. Message-ID and matching From headers never authorize enrichment.
   let added = 0
   db.exec('begin')
   try {
+    const tombstone = db.prepare("insert or ignore into forgotten (key, kind, at) values (?, 'item', ?)")
+    for (const id of migrated) tombstone.run(forgetKey('item', id), now())
     for (const i of items) {
       const inserted = Number(insert.run({
-        id: i.id, source: i.source, thread: i.thread ?? null, sender: i.sender ?? null, from_me: i.fromMe ? 1 : 0,
+        id: i.id, source: i.source, source_id: i.sourceId ?? null, thread: i.thread ?? null, sender: i.sender ?? null, from_me: i.fromMe ? 1 : 0,
         ts: i.ts, text: i.text ?? null, url: i.url ?? null, meta: i.meta ? JSON.stringify(i.meta) : null,
       }).changes)
       added += inserted
-      if (!inserted && i.source === 'mail') {
-        const before = db.prepare('select text from items where id = ?').get(i.id)?.text
-        mergeMail.run(i.fromMe ? 1 : 0, i.sender ?? null, i.fromMe ? 1 : 0, i.fromMe ? 1 : 0, i.text ?? '', JSON.stringify(i.meta || {}), i.text ?? '', i.text ?? '', i.id)
-        if (before !== db.prepare('select text from items where id = ?').get(i.id)?.text) db.prepare('delete from vectors where item_id = ?').run(i.id)
-      }
+
     }
     db.exec('commit')
   } catch (e) {
@@ -218,5 +232,74 @@ function repairText(db) {
     db.prepare('insert into migrations values (?, ?)').run(TEXT_REPAIR, now())
     db.exec('commit')
     db.exec('pragma wal_checkpoint(TRUNCATE)')
+  } catch (e) { db.exec('rollback'); throw e }
+}
+
+// Old merged rows have no recoverable copy provenance. Recollect instead of trusting their text.
+function repairMailProvenance(db) {
+  const version = 'mail-copy-provenance-v2'
+  if (db.prepare('select 1 from migrations where id = ?').get(version)) return
+  db.exec('begin')
+  try {
+    const gone = forgotten(db)
+    const tombstone = db.prepare("insert or ignore into forgotten (key, kind, at) values (?, 'item', ?)")
+    for (const row of db.prepare("select * from items where source = 'mail'").all()) {
+      const { current, aliases } = mailIdentity(row)
+      if (aliases.some(id => gone.has(forgetKey('item', id)))) tombstone.run(forgetKey('item', current), now())
+    }
+    const ids = "select id from items where source = 'mail'"
+    if (db.prepare("select 1 from items where source = 'mail' limit 1").get()) invalidateProfile()
+    for (const table of ['tags', 'vectors', 'plans', 'task_state']) db.exec(`delete from ${table} where item_id in (${ids})`)
+    for (const table of ['chats', 'chat_archive']) db.exec(`delete from ${table} where key in (${ids})`)
+    db.exec(`delete from heads_up where substr(key, 1, instr(key, '@') - 1) in (${ids})`)
+    db.exec("delete from items where source = 'mail'; delete from cursors where source like 'mail:%' or source like 'gmail:%'")
+    db.prepare('insert into migrations values (?, ?)').run(version, now())
+    db.exec('commit')
+  } catch (e) { db.exec('rollback'); throw e }
+}
+
+// Earlier owner-message verdicts could include inherited subjects or quotations.
+// Preserve explicit owner marks, but require confirmation for old inferred proof.
+function repairCompletionProvenance(db) {
+  const version = 'authored-completion-v3'
+  if (db.prepare('select 1 from migrations where id = ?').get(version)) return
+  db.exec('begin')
+  try {
+    db.exec("update task_state set status = 'looks_done', completion_origin = null where completion_origin = 'owner-message'")
+    db.prepare('insert into migrations values (?, ?)').run(version, now())
+    db.exec('commit')
+  } catch (e) { db.exec('rollback'); throw e }
+}
+
+function repairMcpThreads(db) {
+  const version = 'mcp-thread-identity-v1'
+  if (db.prepare('select 1 from migrations where id = ?').get(version)) return
+  db.exec('begin')
+  try {
+    const update = db.prepare('update items set thread = ?, meta = ? where id = ?')
+    for (const row of db.prepare("select * from items where source = 'mcp'").all()) {
+      let meta = {}; try { meta = JSON.parse(row.meta || '{}') } catch {}
+      const channel = meta.threadVersion === 1 ? meta.channel : row.thread || ''
+      const server = (config.mcpSources || []).find(s => s.id === row.source_id)
+      update.run(mcpThread(row.source_id, channel), JSON.stringify({ ...meta, channel, threadVersion: 1, mcpServer: server?.name || 'Removed server' }), row.id)
+      db.prepare('delete from vectors where item_id = ?').run(row.id)
+      for (const table of ['chats', 'chat_archive']) db.prepare(`delete from ${table} where key = ?`).run(row.id)
+    }
+    db.prepare('insert into migrations values (?, ?)').run(version, now())
+    db.exec('commit')
+  } catch (e) { db.exec('rollback'); throw e }
+}
+
+function repairImportedAuthorship(db) {
+  const version = 'imported-authorship-v1'
+  if (db.prepare('select 1 from migrations where id = ?').get(version)) return
+  db.exec('begin')
+  try {
+    for (const row of db.prepare("select id, sender from items where source = 'mcp'").all()) {
+      db.prepare('update items set from_me = 0, sender = ? where id = ?').run(externalSender(row.sender), row.id)
+    }
+    db.exec("update items set from_me = 0 where source = 'mail' and json_valid(meta) and json_extract(meta, '$.client') = 'gmail' and coalesce(json_extract(meta, '$.ownerSent'), 0) != 1")
+    db.prepare('insert into migrations values (?, ?)').run(version, now())
+    db.exec('commit')
   } catch (e) { db.exec('rollback'); throw e }
 }

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.7.7",
+    "date": "2026-11-05",
+    "title": "Apple Mail works, and Kier is more careful",
+    "notes": [
+      "Apple Mail is read properly now; 0.7.6 could not read it.",
+      "Only mail in your Sent folder counts as written by you, and replies are judged by what you wrote, not the subject.",
+      "When something only looks done from your messages, Kier asks you to confirm instead of closing it, and never ticks off your Apple Reminders on its own.",
+      "New, off by default: connect Gmail read only, or add an MCP server as a source."
+    ],
+    "summary": "Apple Mail works, and Kier is more careful about what counts as done."
+  },
+  {
     "version": "0.7.6",
     "date": "2026-11-05",
     "title": "Ask Kier to remind you, and it reads your mail",

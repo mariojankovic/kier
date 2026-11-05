@@ -15,7 +15,7 @@ const { APPLE_EPOCH } = await import('../collectors/util.mjs')
 const { open, now, addItems } = await import('../lib/db.mjs')
 const { setSource } = await import('../lib/settings.mjs')
 const { authorization, readScope } = await import('../lib/authorization.mjs')
-const { forget } = await import('../lib/privacy.mjs')
+const { forget, forgetKey } = await import('../lib/privacy.mjs')
 const { createReminder } = await import('../lib/create-reminder.mjs')
 const { tasks, today } = await import('../lib/tasks.mjs')
 const { evidence, resolvePending } = await import('../lib/resolve.mjs')
@@ -105,7 +105,7 @@ test('Spark collects JSON or RFC address lists and learns owner addresses only f
   f.sparkMessage({ subject: 'Archive', from: 'Sam <sam@example.test>', to: 'Nika <nika@example.test>' })
   assert.equal(collect(f.db, { stores: f.stores }), 3)
   const rows = f.db.prepare('select * from items order by rowid').all()
-  assert.equal(rows[0].from_me, 1)
+  assert.equal(rows[0].from_me, 0)
   assert.equal(rows[1].from_me, 1)
   assert.equal(rows[2].from_me, 0)
   assert.equal(rows[2].thread, 'Sketch')
@@ -115,13 +115,13 @@ test('Spark collects JSON or RFC address lists and learns owner addresses only f
   assert.equal(f.db.prepare("select from_me from items where thread = 'Claim'").get().from_me, 0)
 })
 
-test('Message-ID deduplicates across both clients and remains stable after replay', t => {
+test('Message-ID preserves independent client copies and remains stable after replay', t => {
   const f = fixture(t)
   f.appleMessage({ id: 'shared@example.test' }); f.sparkMessage({ id: '<shared@example.test>' })
-  assert.equal(collect(f.db, { stores: f.stores }), 1)
+  assert.equal(collect(f.db, { stores: f.stores }), 2)
   f.db.exec('delete from cursors')
   assert.equal(collect(f.db, { stores: f.stores }), 0)
-  assert.equal(f.db.prepare('select count(*) n from items').get().n, 1)
+  assert.equal(f.db.prepare('select count(*) n from items').get().n, 2)
 })
 
 test('bounded newest-first backfill and incoming pages never skip an interval', t => {
@@ -193,23 +193,23 @@ test('mail switch blocks collectors and every capture origin, with scoped reads 
   assert.equal(readScope(f.db, authorization(['whatsapp'], [])).prepare('select count(*) n from items').get().n, 0)
 })
 
-test('sent mail resolves a cross-source owner task through the existing evidence path', async t => {
+test('sent mail suggests completion of a cross-source owner reminder', async t => {
   const f = fixture(t)
-  const reminder = createReminder(f.db, { title: 'Send Priya the contract', due: today(), when: '' }, at - 3600)
-  f.sparkMessage({ sent: true, subject: 'Contract', text: 'Priya, I sent the contract you requested.' })
+  const reminder = createReminder(f.db, { title: 'Send Nika the contract', due: today(), when: '' }, at - 3600)
+  f.appleMessage({ sent: true, subject: 'Contract', text: 'Nika, I sent the contract you requested.' })
   collect(f.db, { stores: f.stores })
   const card = tasks(f.db).find(r => r.id === reminder.id)
   const lines = evidence(f.db, card)
   assert.equal(lines.length, 1)
   assert.equal(lines[0].owner, true)
-  assert.match(lines[0].line, /email to Priya/)
+  assert.match(lines[0].line, /email to Nika/)
   assert.equal(evidence(f.db, card, authorization(['kier'], [])).length, 0)
   const original = globalThis.fetch
   globalThis.fetch = async url => new Response(String(url).endsWith('/api/version') ? '{}' : JSON.stringify({ message: { content: JSON.stringify({ done: true, line: 1 }) } }))
   t.after(() => { globalThis.fetch = original })
   await resolvePending(f.db, 4, { now: true })
-  assert.equal(tasks(f.db).find(r => r.id === reminder.id).state, 'handled')
-  assert.equal(tasks(f.db).find(r => r.id === reminder.id).completion_origin, 'owner-message')
+  assert.equal(tasks(f.db).find(r => r.id === reminder.id).state, 'looks_done')
+  assert.equal(tasks(f.db).find(r => r.id === reminder.id).completion_origin, null)
 })
 
 test('incoming personal mail goes through the existing task tagger', async t => {
@@ -241,16 +241,234 @@ test('IMAP mailbox URLs find only bounded local mailbox files', t => {
 })
 
 
-test('Apple Message-ID lookup deduplicates a subject-only copy and keeps sent evidence', t => {
+test('Apple Message-ID lookup separates a received subject-only copy from Sent evidence', t => {
   const f = fixture(t)
   f.appleMessage({ id: '42', body: false })
   f.apple.exec("create table message_ids (message_id text); insert into message_ids(rowid,message_id) values (42,'linked@example.test')")
   f.sparkMessage({ id: 'linked@example.test', subject: 'Contract', text: 'I sent Nika the contract.', sent: true })
-  assert.equal(collect(f.db, { stores: f.stores }), 1)
+  assert.equal(collect(f.db, { stores: f.stores }), 2)
   const rows = f.db.prepare('select * from items').all()
-  assert.equal(rows.length, 1)
-  assert.equal(rows[0].from_me, 1)
-  assert.equal(rows[0].sender, 'Sam')
-  assert.equal(JSON.parse(rows[0].meta).to[0].name, 'Priya')
-  assert.match(rows[0].text, /I sent Nika the contract/)
+  assert.equal(rows.length, 2)
+  const sent = rows.find(r => r.from_me === 1), received = rows.find(r => r.from_me === 0)
+  assert.equal(sent.sender, 'Sam')
+  assert.equal(JSON.parse(sent.meta).to[0].name, 'Priya')
+  assert.match(sent.text, /I sent Nika the contract/)
+  assert.equal(received.sender, 'Nika')
+})
+
+for (const sentClient of ['apple-mail', 'spark']) test(`forged local Message-ID cannot enrich ${sentClient} Sent copy`, t => {
+  const f = fixture(t), id = 'collision@example.test'
+  if (sentClient === 'apple-mail') {
+    f.appleMessage({ id, sent: true, body: false, date: at - 120 })
+    f.sparkMessage({ id, text: 'FORGED_RECEIVED_TEXT', date: at - 30 })
+  } else {
+    f.sparkMessage({ id, sent: true, text: '', date: at - 120 })
+    f.appleMessage({ id, text: 'FORGED_RECEIVED_TEXT', date: at - 30 })
+  }
+  assert.equal(collect(f.db, { stores: f.stores }), 2)
+  const sent = f.db.prepare('select * from items where from_me = 1').get()
+  assert.equal(sent.sender, 'Sam'); assert.equal(sent.ts, at - 120)
+  assert.doesNotMatch(sent.text, /FORGED/)
+  assert.match(f.db.prepare('select text from items where from_me = 0').get().text, /FORGED/)
+})
+
+test('legacy merged mail is discarded and collectors replay without changing forgotten keys', t => {
+  const path = join(dir, 'legacy.db'), db = open(path)
+  db.prepare("delete from migrations where id = 'mail-copy-provenance-v2'").run()
+  db.prepare("insert into items(id,source,from_me,ts,text) values ('mail:legacy','mail',1,?,'unverifiable')").run(at)
+  db.prepare("insert into cursors values ('mail:fixture','old'), ('gmail:fixture','old')").run()
+  db.prepare("insert into forgotten values ('fixture-key','item',?)").run(at)
+  db.close()
+  const migrated = open(path); t.after(() => migrated.close())
+  assert.equal(migrated.prepare('select count(*) n from items').get().n, 0)
+  assert.equal(migrated.prepare('select count(*) n from cursors').get().n, 0)
+  assert.equal(migrated.prepare('select key from forgotten').get().key, 'fixture-key')
+})
+
+
+for (const client of ['apple-mail', 'spark']) test(`${client} spoofed owner From with reused Message-ID cannot become owner evidence`, t => {
+  const f = fixture(t), id = 'spoof@example.test'
+  f.appleMessage({ id, sent: true, body: false, date: at - 120 })
+  f.sparkMessage({ id, sent: true, text: '', date: at - 120 })
+  if (client === 'apple-mail') {
+    const pk = f.appleMessage({ id, text: 'FORGED_OWNER_TEXT' })
+    f.apple.prepare('update messages set sender = 2 where rowid = ?').run(pk)
+  } else f.sparkMessage({ id, from: 'Sam <sam@example.test>', to: 'Nika <nika@example.test>', text: 'FORGED_OWNER_TEXT' })
+  collect(f.db, { stores: f.stores })
+  const rows = f.db.prepare('select * from items').all()
+  assert.equal(rows.length, 3)
+  assert.equal(rows.filter(r => r.from_me).length, 2)
+  for (const row of rows.filter(r => r.from_me)) assert.doesNotMatch(row.text, /FORGED/)
+  assert.match(rows.find(r => !r.from_me).text, /FORGED_OWNER_TEXT/)
+})
+
+test('a received copy never replaces another correspondent or account copy', t => {
+  const f = fixture(t), id = 'received-collision@example.test'
+  f.appleMessage({ id, body: false, date: at - 120 })
+  f.sparkMessage({ id, subject: 'Different thread', text: 'FORGED_CORRESPONDENT_TEXT' })
+  collect(f.db, { stores: f.stores })
+  const rows = f.db.prepare('select * from items').all()
+  assert.equal(rows.length, 2)
+  const nika = rows.find(r => r.sender === 'Nika')
+  assert.equal(nika.text, 'Contract'); assert.equal(nika.thread, 'Contract'); assert.equal(nika.ts, at - 120)
+  assert.notEqual(JSON.parse(nika.meta).account, JSON.parse(rows.find(r => r.sender === 'Priya').meta).account)
+})
+
+test('Apple Mail ids stored as 64-bit integers are read as text instead of failing the store', t => {
+  const f = fixture(t)
+  const pk = f.appleMessage({ subject: 'Library book', text: 'Can you return the library book?' })
+  // Real Envelope Index files keep some message ids as integers beyond Number.MAX_SAFE_INTEGER.
+  f.apple.exec(`alter table messages rename to old_messages;
+    create table messages (subject integer, sender integer, mailbox integer, date_sent integer, date_received integer, message_id integer);
+    insert into messages(rowid, subject, sender, mailbox, date_sent, date_received, message_id)
+      select rowid, subject, sender, mailbox, date_sent, date_received, 7002049013125224085 from old_messages where rowid = ${pk};
+    drop table old_messages`)
+  assert.equal(collect(f.db, { stores: f.stores }), 1)
+})
+
+for (const sent of [false, true]) for (const form of ['canonical', 'previous', 'current']) {
+  test(`forgotten ${form} ${sent ? 'sent' : 'received'} copy stays forgotten after migration and full recollection`, t => {
+    const f = fixture(t), path = join(f.home, 'migration.db')
+    f.appleMessage({ id: 'forgotten@example.test', sent })
+    f.appleMessage({ id: 'retained@example.test', subject: 'Sketch' })
+    const old = open(path)
+    collect(old, { stores: f.stores })
+    const row = old.prepare("select * from items where text like 'Contract%'").get()
+    const current = row.id, canonical = current.split(':copy:')[0]
+    const historic = form === 'canonical' ? canonical : form === 'previous' ? `${canonical}:copy:${sent ? 'sent' : 'received'}` : current
+    old.prepare('update items set id = ? where id = ?').run(historic, current)
+    assert.equal(forget(old, { id: historic }), 1)
+    old.prepare("delete from migrations where id = 'mail-copy-provenance-v2'").run()
+    old.close()
+    const migrated = open(path); t.after(() => migrated.close())
+    assert.equal(collect(migrated, { stores: f.stores }), 1)
+    assert.equal(migrated.prepare("select count(*) n from items where text like 'Contract%'").get().n, 0)
+    assert.ok(migrated.prepare('select 1 from forgotten where key = ?').get(forgetKey('item', current)))
+    migrated.exec('delete from cursors')
+    assert.equal(collect(migrated, { stores: f.stores }), 0)
+    assert.equal(migrated.prepare('select count(*) n from items').get().n, 1)
+  })
+}
+test('migration forwards a retained legacy tombstone before clearing old mail rows', t => {
+  const path = join(dir, 'forwarded-tombstone.db'), old = open(path)
+  const row = { id: 'mail:fixture:copy:sent', source: 'mail', sender: 'Sam', fromMe: true, ts: at,
+    text: 'Fixture', meta: { ownerSent: true, client: 'apple-mail', copyKey: 'fixture', account: 'fixture' } }
+  old.prepare('insert into items(id,source,sender,from_me,ts,text,meta) values (?,?,?,?,?,?,?)')
+    .run(row.id, row.source, row.sender, 1, row.ts, row.text, JSON.stringify(row.meta))
+  old.prepare("insert into forgotten values (?, 'item', ?)").run(forgetKey('item', row.id), at)
+  old.prepare("delete from migrations where id = 'mail-copy-provenance-v2'").run()
+  old.close()
+  const migrated = open(path); t.after(() => migrated.close())
+  assert.equal(migrated.prepare('select count(*) n from forgotten').get().n, 2)
+  assert.equal(addItems(migrated, [{ ...row, id: 'mail:fixture' }]), 0)
+})
+
+for (const wasSent of [true, false]) test(`a changed Sent classification cannot bypass the old ${wasSent ? 'sent' : 'received'} tombstone`, t => {
+  const path = join(dir, `changed-direction-${wasSent}.db`), old = open(path)
+  const base = `mail:changed-direction-${wasSent}`, historic = `${base}:copy:${wasSent ? 'sent' : 'received'}`
+  old.prepare('insert into items(id,source,from_me,ts,text) values (?, ?, ?, ?, ?)')
+    .run(historic, 'mail', Number(wasSent), at, 'Forgotten fixture')
+  assert.equal(forget(old, { id: historic }), 1)
+  old.prepare("delete from migrations where id = 'mail-copy-provenance-v2'").run()
+  old.close()
+  const migrated = open(path); t.after(() => migrated.close())
+  const copy = { id: base, source: 'mail', fromMe: !wasSent, sender: 'Sam', ts: at,
+    text: 'Forgotten fixture', meta: { ownerSent: !wasSent, client: 'apple-mail', copyKey: 'fixture', account: 'fixture' } }
+  assert.equal(addItems(migrated, [copy]), 0)
+  assert.equal(migrated.prepare('select count(*) n from forgotten').get().n, 3)
+  assert.equal(addItems(migrated, [copy]), 0)
+  assert.equal(migrated.prepare('select count(*) n from items').get().n, 0)
+})
+
+for (const client of ['apple-mail', 'spark']) for (const hasMessageID of [true, false]) {
+  test(`${client}: forgotten mail survives a new store and full backfill (Message-ID: ${hasMessageID})`, t => {
+    const original = fixture(t), reconnected = fixture(t)
+    const method = client === 'spark' ? 'sparkMessage' : 'appleMessage'
+    const options = { id: hasMessageID ? 'stable-local@example.test' : 'no-message-id', date: at - 60 }
+    original[method](options)
+    assert.equal(collect(original.db, { stores: original.stores }), 1)
+    const row = original.db.prepare('select * from items').get()
+    assert.equal(forget(original.db, { id: row.id }), 1)
+    // A new row id, store path/account key, copy key and normalized Message-ID.
+    reconnected[method]({ id: 'retained@example.test', subject: 'Retained sketch' })
+    reconnected[method]({ ...options, id: hasMessageID ? 'STABLE-LOCAL@EXAMPLE.TEST' : options.id })
+    assert.equal(collect(original.db, { stores: reconnected.stores }), 1)
+    assert.equal(original.db.prepare('select count(*) n from items').get().n, 1)
+    assert.match(original.db.prepare('select text from items').get().text, /Retained sketch/)
+  })
+}
+test('stable forget identity does not suppress another conversation reusing Message-ID', t => {
+  const f = fixture(t)
+  f.sparkMessage({ id: 'reused@example.test' })
+  collect(f.db, { stores: f.stores })
+  forget(f.db, { id: f.db.prepare('select id from items').get().id })
+  f.sparkMessage({ id: 'reused@example.test', from: JSON.stringify({ name: 'Jonas', email: 'jonas@example.test' }) })
+  assert.equal(collect(f.db, { stores: f.stores }), 1)
+})
+test('forgetting a mail thread writes stable tombstones before deleting its rows', t => {
+  const f = fixture(t), next = fixture(t)
+  f.appleMessage({ id: 'thread-forgotten@example.test' })
+  collect(f.db, { stores: f.stores })
+  forget(f.db, { source: 'mail', thread: 'Contract' })
+  next.appleMessage({ id: 'thread-forgotten@example.test', subject: 'Changed subject' })
+  assert.equal(collect(f.db, { stores: next.stores }), 0)
+})
+
+test('a forgotten mail stays forgotten when an address is redacted, and every copy of it goes', async t => {
+  const { forget } = await import('../lib/privacy.mjs')
+  const db = open(':memory:'); t.after(() => db.close())
+  const mail = (id, client, fromMe, sender) => ({ id, source: 'mail', thread: 'Library book', sender, fromMe, ts: at - 100, text: 'Library book\nThe book is due Friday.',
+    meta: { client, ownerSent: fromMe, messageId: 'shared-77@example.test', subject: 'Library book', body: 'The book is due Friday.', bodyKind: 'plain',
+      from: [{ name: 'Lucija', email: 'code1234@example.test' }], to: [{ name: 'Sam', email: 'sam@example.test' }] } })
+  addItems(db, [mail('mail:a', 'gmail', false, 'Lucija'), mail('mail:b', 'spark', false, 'Lucija')])
+  const before = db.prepare("select id from items where source = 'mail'").all().map(r => r.id)
+  assert.equal(before.length >= 1, true)
+  forget(db, { id: before[0] })
+  assert.equal(db.prepare("select count(*) n from items where source = 'mail'").get().n, 0, 'every copy of the message is gone')
+  addItems(db, [mail('mail:c', 'gmail', false, 'Lucija')])
+  assert.equal(db.prepare("select count(*) n from items where source = 'mail'").get().n, 0, 'a reconnect does not bring it back')
+})
+
+test('a forgotten mail with a doubly redactable address stays forgotten after a reconnect', async t => {
+  const { forget } = await import('../lib/privacy.mjs')
+  const db = open(':memory:'); t.after(() => db.close())
+  const mail = (id) => ({ id, source: 'mail', thread: 'Bike repair', sender: 'Borna', fromMe: false, ts: at - 100, text: 'Bike repair\nThe bike is ready.',
+    meta: { client: 'gmail', providerMessageId: undefined, messageId: 'bike-9@example.test', subject: 'Bike repair', body: 'The bike is ready.', bodyKind: 'plain',
+      from: [{ name: 'Borna', email: 'code1234-5678@example.test' }], to: [{ name: 'Sam', email: 'sam@example.test' }] } })
+  addItems(db, [mail('mail:first')])
+  forget(db, { id: db.prepare("select id from items where source = 'mail'").get().id })
+  addItems(db, [mail('mail:after-reconnect')])
+  assert.equal(db.prepare("select count(*) n from items where source = 'mail'").get().n, 0)
+})
+
+test('mail ids and the adult host filter are unchanged by redaction', t => {
+  const db = open(':memory:'); t.after(() => db.close())
+  addItems(db, [{ id: 'mail:adult', source: 'mail', thread: 'Offer', sender: 'Spam', fromMe: false, ts: at - 50, text: 'Offer', url: 'https://code1234.porn/',
+    meta: { client: 'spark', messageId: 'adult-1@example.test', from: [{ email: 'offer@example.test' }], to: [] } }])
+  assert.equal(db.prepare("select count(*) n from items where url like '%porn%'").get().n, 0)
+})
+
+test('Forget holds against the stored form: no-id mail, coded threads, and digit-only differences stay apart', async t => {
+  const { forget } = await import('../lib/privacy.mjs')
+  const db = open(':memory:'); t.after(() => db.close())
+  const mail = (id, extra = {}) => ({ id, source: 'mail', thread: 'Locker code1234', sender: 'Tea', fromMe: false, ts: at - 90, text: 'Locker code1234\nThe locker is free.',
+    meta: { client: 'spark', subject: 'Locker code1234', body: 'The locker is free.', bodyKind: 'preview', from: [{ name: 'Tea', email: 'tea@example.test' }], to: [{ email: 'sam@example.test' }], ...extra } })
+  addItems(db, [mail('mail:nid-1')])
+  forget(db, { id: db.prepare("select id from items where source = 'mail'").get().id })
+  addItems(db, [mail('mail:nid-2', { copyKey: 'other-store' })])
+  assert.equal(db.prepare("select count(*) n from items where source = 'mail'").get().n, 0, 'no-id mail with a code in its subject stays forgotten')
+
+  addItems(db, [mail('mail:thread-1', { messageId: 'locker-a@example.test' })])
+  const thread = db.prepare("select thread from items where source = 'mail'").get().thread
+  forget(db, { source: 'mail', thread })
+  addItems(db, [mail('mail:thread-2', { messageId: 'locker-b@example.test' })])
+  assert.equal(db.prepare("select count(*) n from items where source = 'mail'").get().n, 0, 'a forgotten coded thread stays forgotten')
+
+  const pair = (id, email) => ({ id, source: 'mail', thread: 'Rota', sender: 'Jonas', fromMe: false, ts: at - 80, text: 'Rota\nShifts next week.',
+    meta: { client: 'spark', messageId: 'rota-1@example.test', subject: 'Rota', body: 'Shifts next week.', bodyKind: 'preview', from: [{ email }], to: [{ email: 'sam@example.test' }] } })
+  addItems(db, [pair('mail:rota-a', 'jonas1@example.test'), pair('mail:rota-b', 'jonas2@example.test')])
+  const rows = db.prepare("select id from items where source = 'mail' and thread = 'Rota'").all()
+  assert.equal(rows.length, 2)
+  forget(db, { id: rows[0].id })
+  assert.equal(db.prepare("select count(*) n from items where source = 'mail' and thread = 'Rota'").get().n, 1, 'a different sender is not forgotten with it')
 })

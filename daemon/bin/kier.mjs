@@ -1,4 +1,6 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
+import { background } from '../lib/background.mjs'
+import { initializeGmail } from '../lib/google.mjs'
 import { readSecret, signedFetch } from '../lib/http-auth.mjs'
 import { notify } from '../lib/notify.mjs'
 import { syncCallbacks } from '../lib/callbacks.mjs'
@@ -21,7 +23,7 @@ import { doubleCheck } from '../lib/doublecheck.mjs'
 import { checkHeadsUps } from '../lib/headsup.mjs'
 import { explainAsks, resolvePending, resolveWaiting } from '../lib/resolve.mjs'
 import { logTo as secondLog } from '../lib/second.mjs'
-import { prerender, speak } from '../lib/speak.mjs'
+import { prerender, speak, sweepSpeechFiles } from '../lib/speak.mjs'
 import { dropCopies } from '../collectors/util.mjs'
 import { startRuntime } from '../lib/runtime.mjs'
 import { indexPending } from '../lib/meaning.mjs'
@@ -102,6 +104,7 @@ function writeBrief(send) {
 async function run() {
   // Fail before any worker, collector, maintenance or launcher starts.
   await serve(db, { install })
+  await sweepSpeechFiles()
   // Reminders already have a direct source; their alerts must never create another task.
   excludeReminderNotices(db)
   // Set the forward-only callback boundary before backfill or the brief becomes visible.
@@ -109,6 +112,7 @@ async function run() {
   // Started by Kier.app: when macOS quits the app (as it does after a permission change) this process is left
   // behind holding the port, and every new start fails. It goes with the app.
   if (process.env.KIER_APP) setInterval(() => { if (process.ppid === 1) process.exit(0) }, 5000).unref()
+  if (process.env.KIER_NATIVE_VAULT === '1') await initializeGmail().catch(() => console.log(stamp(), 'Gmail native storage unavailable'))
   dropCopies()
   removeExtension()
   startRuntime((line) => console.log(stamp(), line))
@@ -132,9 +136,11 @@ async function run() {
   let nextDiscover = Date.now() + 30_000
   let waiting = false
   const sent = new Set()
-  indexForSearch()
-  readPlans()
+  const report = () => console.log(stamp(), errorRecord('BACKGROUND_FAILED'))
+  background(indexForSearch, { report, retry: true })
+  background(readPlans, { report, retry: true })
   for (;;) {
+    try {
     // What each installed app is for: daily, and every 10 minutes while some still wait for d1.
     if (Date.now() > nextDiscover) {
       const d = await discover(db).catch((e) => ({ error: errorRecord('BACKGROUND_FAILED') }))
@@ -142,7 +148,7 @@ async function run() {
       nextDiscover = Date.now() + (d.waiting || d.error ? 10 * 60_000 : 24 * 3600_000)
     }
     // Notifications disappear when dismissed, so they're read every 30 seconds.
-    if (lastCollect && Date.now() - lastNotes > 30_000) {
+    if (lastCollect && Date.now() - lastNotes > 30_000 && fullDiskAccess()) {
       const n = await collectInChild(['notifications'])
       if (n.notifications) console.log(stamp(), 'notifications', JSON.stringify(n))
       lastNotes = Date.now()
@@ -152,6 +158,8 @@ async function run() {
       if (!fullDiskAccess()) {
         if (!waiting) console.log(stamp(), `waiting for Full Disk Access, see ${url}/setup`)
         waiting = true
+        await collectInChild(['gmail', 'mcp'])
+        lastCollect = Date.now()
       } else {
         waiting = false
         console.log(stamp(), 'collect', JSON.stringify(await collectInChild()))
@@ -163,7 +171,7 @@ async function run() {
       sent.add(`${today()} ${hm}`)
       writeBrief(true)
       // Off unless the owner turns it on: a voice at 08:00 is lovely at home and awkward in a meeting.
-      if (config.speakBrief && hm === config.briefTimes[0]) speak(db)
+      if (config.speakBrief && hm === config.briefTimes[0]) background(() => speak(db), { report })
       console.log(stamp(), 'brief sent')
     }
     // Call history is deterministic and should stay current even while the model waits for memory.
@@ -178,7 +186,7 @@ async function run() {
     // Learn who the owner is on the first run, and again each week, while nothing new waits to be read.
     if (!t.tagged && profileDue() && !profileBuilding()) buildProfile(db).then(() => console.log(stamp(), 'profile updated')).catch((e) => console.log(stamp(), 'profile', errorRecord('BACKGROUND_FAILED')))
     // Keep the spoken brief rendered, so pressing play is instant.
-    if (!t.tagged && Date.now() - lastRender > 10 * 60_000) { lastRender = Date.now(); prerender(db) }
+    if (!t.tagged && Date.now() - lastRender > 10 * 60_000) { lastRender = Date.now(); background(() => prerender(db), { report }) }
     // With nothing new to read, see whether open tasks got done in the meantime.
     // Busy: only cards you've just answered; quiet: anything due for a look.
     const done = await resolvePending(db, t.tagged || t.checked ? 2 : 4, { answered: !!(t.tagged || t.checked) }).catch((e) => ({ error: errorRecord('BACKGROUND_FAILED') }))
@@ -215,6 +223,7 @@ async function run() {
     }
     // Busy while there is a backlog, idle otherwise.
     await new Promise((r) => setTimeout(r, t.tagged || t.checked || done.checked ? 500 : 30_000))
+    } catch { report(); await new Promise(r => setTimeout(r, 1000)) }
   }
 }
 
@@ -323,7 +332,8 @@ const commands = {
   },
   tag: async () => console.log(await tagPending(db, { limit: Number(args[0]) || 25 })),
   brief: () => console.log(writeBrief(args.includes('--notify'))),
-  serve: async () => { await serve(db, { install }); console.log(url) },
+  // Abandoned audio from a daemon that died abruptly is swept however Kier starts.
+  serve: async () => { sweepSpeechFiles().catch(() => {}); await serve(db, { install }); console.log(url) },
   run,
   status: () => {
     for (const r of db.prepare('select * from runs order by source').all()) console.log(r.source.padEnd(10), r.ok ? `ok, +${r.added}` : r.error)

@@ -84,6 +84,14 @@ done
 iconutil -c icns "$ICONSET" -o "$RES/Kier.icns"
 # Empty KierRoot and KierNode: the launcher finds the daemon and Node inside the app.
 sed -e "s#__ROOT__##" -e "s#__NODE__##" app/Info.plist > "$APP/Contents/Info.plist"
+# The installed-app client ID is public configuration, never a client secret.
+KIER_GOOGLE_CLIENT_ID="${KIER_GOOGLE_CLIENT_ID:-}" python3 - "$APP/Contents/Info.plist" <<'PYTHON'
+import os, plistlib, sys
+path = sys.argv[1]
+with open(path, 'rb') as f: info = plistlib.load(f)
+info['KierGoogleClientID'] = os.environ['KIER_GOOGLE_CLIENT_ID']
+with open(path, 'wb') as f: plistlib.dump(info, f)
+PYTHON
 /usr/libexec/PlistBuddy -c "Set :SUFeedURL ${KIER_UPDATE_FEED:-https://github.com/${KIER_PUBLIC_REPO:-mariojankovic/kier}/releases/latest/download/appcast.xml}" "$APP/Contents/Info.plist"
 
 # The daemon with only what it runs on: no tests, no development packages.

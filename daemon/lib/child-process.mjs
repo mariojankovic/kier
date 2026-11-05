@@ -5,13 +5,13 @@ import { isAbsolute, join } from 'node:path'
 import { userInfo } from 'node:os'
 import { promisify } from 'node:util'
 const directories = ['/usr/bin', '/bin', '/usr/sbin', '/sbin', '/opt/homebrew/bin', '/usr/local/bin']
-const inheritedKeys = ['KIER_DATA_DIR', 'KIER_APP', 'KIER_CLIENT', 'KIER_MCP_ROLE']
+const inheritedKeys = ['KIER_DATA_DIR', 'KIER_APP', 'KIER_CLIENT', 'KIER_MCP_ROLE', 'KIER_GOOGLE_CLIENT_ID', 'KIER_WORKER_TAG']
 export function childEnv(explicit = {}) {
   const env = { HOME: userInfo().homedir, PATH: directories.join(':'), LANG: 'en_US.UTF-8', TMPDIR: '/tmp' }
   for (const key of inheritedKeys) if (process.env[key] !== undefined) env[key] = process.env[key]
   // Explicit per-child settings only, never an ambient environment spread.
   for (const [key, value] of Object.entries(explicit)) {
-    if (key === 'PATH' || /^(NODE_|PYTHON|DYLD_|LD_)/.test(key)) continue
+    if (key === 'KIER_WORKER_TAG' || key === 'PATH' || /^(NODE_|PYTHON|DYLD_|LD_)/.test(key)) continue
     env[key] = value
   }
   return env

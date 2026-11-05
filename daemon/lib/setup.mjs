@@ -1,3 +1,4 @@
+import { gmailStep, connectGmail, disconnectGmail } from './google.mjs'
 import { mailSetup } from '../collectors/mail.mjs'
 import { modelFetch } from './model-provider.mjs'
 // The setup checklist: each step checks the real state of the Mac, so it turns green the moment
@@ -197,6 +198,7 @@ export async function steps(db, eyes = {}) {
         : 'Lets Kier read conversations in apps like Discord while you have them open. Open the settings and turn on Kier under Accessibility.',
       { id: 'accessibility', label: 'Open settings' }, true),
     step('chatapps', 'Your messaging apps', false, chatApps(), viber ? null : { id: 'viber', label: 'Get Viber for Mac' }, true),
+    await gmailStep(),
     step('mail', 'Mail', mail.enabled && lastRun(db, 'mail')?.ok === 1, mail.detail, null, true),
   ]
 }
@@ -204,6 +206,8 @@ export async function steps(db, eyes = {}) {
 export async function act(id, { install, collect } = {}) {
   cache.clear()
   switch (id) {
+    case 'gmail': return connectGmail()
+    case 'gmailoff': return disconnectGmail()
     case 'terms': return acceptTerms()
     // The app asks for Calendars and Reminders first, then turns it on here; off, it removes the Kier calendar and list.
     case 'phonecal': return setSwitch('phoneCalendar', true)

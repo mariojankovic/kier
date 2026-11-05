@@ -37,8 +37,8 @@ test('a short answer keeps its owner question without importing an older work to
   const context = contextForTag(db, burst.start, burst.text)
   assert.deepEqual(context.map(c => [c.from, c.text]), [[config.me, QUESTION]])
   const user = messages({ ...item, text: burst.read }, context).at(-1).content
-  assert.ok(user.indexOf(QUESTION) < user.indexOf('Message to tag:'))
-  assert.ok(user.endsWith(REPLIES.join('\n')))
+  assert.equal(JSON.parse(user.split('\n')[1])['Earlier in this chat (context only):'][0].text, QUESTION)
+  assert.equal(JSON.parse(user.split('\n')[1]).item.text, REPLIES.join('\n'))
   assert.doesNotMatch(user, /cardboard|maze|walls/i)
 })
 
@@ -99,7 +99,7 @@ test('fresh tagging sends the whole short reply burst with its question and stor
   assert.equal(primary.length, 1)
   const user = primary[0].messages.at(-1).content
   assert.match(user, /Earlier in this chat \(context only\):/)
-  assert.ok(user.includes(QUESTION)); assert.ok(user.endsWith(REPLIES.join('\n')))
+  assert.ok(user.includes(QUESTION)); assert.equal(JSON.parse(user.split('\n')[1]).item.text, REPLIES.join('\n'))
   assert.equal(db.prepare("select is_task from tags where item_id='last'").get().is_task, 0)
   assert.equal(db.prepare("select said from tags where item_id='last'").get().said, REPLIES.join('\n'))
 })
@@ -153,7 +153,7 @@ test('real pickup requests and invitations remain tasks with their original mess
     const result = await tagPending(db)
     assert.equal(result.failed, 0)
     assert.equal(requests.length, 1)
-    assert.ok(requests[0].messages.at(-1).content.endsWith(text))
+    assert.equal(JSON.parse(requests[0].messages.at(-1).content.split('\n')[1]).item.text, text)
     const saved = db.prepare('select is_task,second,card from tags where item_id=?').get(kind)
     assert.equal(saved.is_task, 1); assert.equal(saved.second, 0.95)
     assert.equal(saved.card, kind === 'invite' ? 'appointment' : 'todo')

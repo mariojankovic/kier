@@ -6,7 +6,7 @@ import { config } from './config.mjs'
 import { MLX, embedReady } from './runtime.mjs'
 import { offClause } from './settings.mjs'
 
-export const SOURCES = ['whatsapp', 'imessage', 'mail', 'discord', 'chat', 'notifications', 'ai', 'downloads', 'social']
+export const SOURCES = ['whatsapp', 'imessage', 'mail', 'mcp', 'discord', 'chat', 'notifications', 'ai', 'downloads', 'social']
 export const ready = () => embedReady()
 
 export async function embed(texts, { query = false } = {}) {
@@ -42,7 +42,7 @@ const text = (r) => String(r.text).replace(/\s+/g, ' ').slice(0, 400)
 // The next messages without a fingerprint, newest first. Returns how many got one.
 export async function indexPending(db, limit = 48) {
   if (!ready()) return 0
-  const rows = db.prepare(`select i.id, i.text from items i left join vectors v on v.item_id = i.id
+  const rows = readScope(db, localAuthorization()).prepare(`select i.id, i.text from items i left join vectors v on v.item_id = i.id
     where v.item_id is null and i.source in (${marks}) and length(i.text) >= 3 ${offClause()} order by i.ts desc limit ?`).all(...SOURCES, limit)
   if (!rows.length) return 0
   const vecs = await embed(rows.map(text))
@@ -121,7 +121,7 @@ export async function search(db, question, { k = 20, days = 365, step = () => {}
   const anywhere = who ? await close('', [], 10) : []
   const ids = [...new Set([...byMeaning, ...byWords, ...anywhere].map((r) => r.id))]
   if (!ids.length) return []
-  const found = db.prepare(`select id, source, thread, sender, from_me, ts, text from items where id in (${ids.map(() => '?').join(', ')}) order by ts`).all(...ids)
+  const found = db.prepare(`select * from items where id in (${ids.map(() => '?').join(', ')}) order by ts`).all(...ids)
   // Summarize which conversations supply most results for the activity indicator.
   const where = Object.entries(found.reduce((n, m) => ({ ...n, [m.thread || m.source]: (n[m.thread || m.source] || 0) + 1 }), {}))
     .sort((a, b) => b[1] - a[1]).slice(0, 2).map(([t]) => t)

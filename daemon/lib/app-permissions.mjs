@@ -15,15 +15,20 @@ const identities = {
 }
 export const appSources = Object.fromEntries(Object.entries(identities).flatMap(([source, names]) => names.map(name => [name, source])))
 // Read again whenever config.json changes, never more often: callers may ask once per row.
-let cached = { stamp: null, disabled: null }
+let cached = { stamp: null, disabled: null, mcp: [] }
 export function capturePolicy() {
   const stamp = existsSync(configPath) ? (() => { const s = statSync(configPath); return `${s.mtimeMs}:${s.size}:${s.ino}` })() : 'none'
-  const disabled = stamp === cached.stamp ? cached.disabled
-    : existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')).off ?? [] : config.off
-  if (!Array.isArray(disabled) || !disabled.every(s => typeof s === 'string')) throw Error('CAPTURE_POLICY_UNAVAILABLE')
-  cached = { stamp, disabled }
+  if (stamp !== cached.stamp) {
+    const saved = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : config
+    const disabled = saved.off ?? []
+    if (!Array.isArray(disabled) || !disabled.every(s => typeof s === 'string') || !Array.isArray(saved.mcpSources ?? [])) throw Error('CAPTURE_POLICY_UNAVAILABLE')
+    const mcp = (saved.mcpSources || []).filter(s => s.enabled === true && s.tool && /^[a-zA-Z0-9_-]{1,64}$/.test(s.id)).map(s => s.id)
+    cached = { stamp, disabled, mcp }
+  }
+  const { disabled } = cached
   return { disabled, appSources }
 }
+export const activeMcpSources = () => { capturePolicy(); return cached.mcp }
 // The names that could tie a row to a switched-off app, per off-list; most off-lists name no app at all.
 const offNames = new Map()
 function namesFor(disabled) {
@@ -38,6 +43,7 @@ function namesFor(disabled) {
 }
 export function permitsItem(item, disabled = capturePolicy().disabled) {
   if (disabled.includes(item.source)) return false
+  if (item.source === 'mcp' && !activeMcpSources().includes(item.sourceId || item.source_id)) return false
   const names = namesFor(disabled)
   if (!names.length) return true
   // Only rows that mention one of those names can be from a switched-off app; the rest need no parsing.

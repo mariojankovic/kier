@@ -92,12 +92,15 @@ let filter = 'all'
 let items = []
 
 function itemRow(i, withDay) {
+  let metadata = {}; try { metadata = JSON.parse(i.meta || '{}') } catch {}
+  const channel = i.source === 'mcp' ? metadata.channel || '' : i.thread || ''
+  const origin = i.source === 'mcp' ? `MCP server: ${metadata.mcpServer || 'Unknown'}` : NAMES[i.source] || i.source
   const who = i.from_me ? 'You' : i.sender
   const task = i.is_task ? `<span class="tag">Task${i.due ? `, ${esc(label(i.due))}` : ''}${i.amount ? `, ${esc(i.amount)}` : ''}</span>` : ''
   const href = safeLink(i.url)
   const link = href ? ` <a href="${esc(href)}">open</a>` : ''
   return `<div class="row"><div class="time">${withDay ? esc(new Date(i.ts * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })) + '<br>' : ''}${time(i.ts)}</div><div>
-    <div class="meta"><b>${esc(i.thread || '')}</b>${who && who !== i.thread ? `<span>${esc(who)}</span>` : ''}<span class="src">${esc(NAMES[i.source] || i.source)}</span>${task}${link}<button class="forget" data-forget="${esc(i.id)}">Forget</button></div>
+    <div class="meta"><b>${esc(channel)}</b>${who && who !== i.thread ? `<span>${esc(who)}</span>` : ''}<span class="src">${esc(origin)}</span>${task}${link}<button class="forget" data-forget="${esc(i.id)}">Forget</button></div>
     <div class="text">${esc(i.text)}</div></div></div>`
 }
 
@@ -113,8 +116,9 @@ const CARDS = {
 function taskRow(t, note) {
   const who = t.from_me ? 'you' : t.sender
   const card = CARDS[t.card] || CARDS.todo
-  const pending = t.state === 'looks_done'
-  const m = pending ? { mark: 'done', text: 'Confirm' } : card.main
+  const unneeded = t.state === 'looks_unneeded'
+  const pending = t.state === 'looks_done' || unneeded
+  const m = pending ? { mark: unneeded ? 'dismissed' : 'done', text: 'Confirm' } : card.main
   const href = safeLink(t.url)
   const main = m.reply ? (href ? `<a class="main" href="${esc(href)}">${m.text}</a>` : '')
     : m.calendar ? `<button class="main" data-cal="1">${m.text}</button>` : `<button class="main" data-mark="${m.mark}">${m.text}</button>`
@@ -124,7 +128,7 @@ function taskRow(t, note) {
     t.card !== 'promise' ? '<button data-mark="dismissed">Not mine</button>' : '',
   ].join('')
   return `<div class="task card-${esc(t.card || 'todo')}" data-id="${esc(t.id)}"><div class="what">
-    <div class="kind">${pending ? 'Looks done' : card.label}${t.due ? `, ${esc(label(t.due))}` : ''}</div>
+    <div class="kind">${pending ? (unneeded ? 'Not needed?' : 'Looks done') : card.label}${t.due ? `, ${esc(label(t.due))}` : ''}</div>
     <div class="line">${esc(t.summary || t.text)}${t.amount ? ` <span class="amount">${esc(t.amount)}</span>` : ''}</div>
     <div class="meta"><span>${esc(who)}, ${esc(NAMES[t.source] || t.source)}</span>${note ? `<span>${esc(note)}</span>` : ''}</div>
     ${pending && t.reason ? `<div class="meta">${esc(t.reason)}</div>` : ''}</div>

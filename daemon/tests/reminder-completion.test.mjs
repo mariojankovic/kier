@@ -80,13 +80,15 @@ test('a sender using the owner name is still third-party evidence', async t => {
   assert.deepEqual(syncReminders(db, [reminder]).close, [])
 })
 
-test('an actual outgoing owner confirmation can complete the original reminder', async t => {
+test('imported outgoing evidence still needs owner confirmation for an owner reminder', async t => {
   const { db, reminder, card } = fixture(t, { owner: true, sender: 'Sam' })
   assert.equal(evidence(db, card())[0].owner, true)
   model(t, { done: true, line: 1 })
   await resolvePending(db, 4, { now: true })
-  assert.equal(card().state, 'handled')
-  assert.equal(card().completion_origin, 'owner-message')
+  assert.equal(card().state, 'looks_done')
+  assert.equal(card().completion_origin, null)
+  assert.deepEqual(syncReminders(db, [reminder]).close, [])
+  markTask(db, card().id, 'done')
   assert.deepEqual(syncReminders(db, [reminder]).close, ['archive'])
 })
 
@@ -126,15 +128,15 @@ test('completion in Apple Reminders settles a pending suggestion', t => {
   assert.equal(card().completion_origin, 'reminders')
 })
 
-test('Kier list items retain inferred completion behavior', t => {
+test('inferred completion never ticks an exported reminder without owner authority', t => {
   const { db } = fixture(t)
   db.prepare("insert into tags (item_id, is_task, summary, due, card, model, tagged_at) values ('proof', 1, 'Pay the archive fee', ?, 'payment', 'test', ?)").run(today(), now())
   const task = tasks(db).find(row => row.id === 'proof')
   recordCompletion(db, task, { owner: false }, 'Looks done: Nika confirmed it')
-  assert.equal(tasks(db).find(row => row.id === 'proof').state, 'handled')
+  assert.equal(tasks(db).find(row => row.id === 'proof').state, 'looks_done')
   setSwitch('phoneReminders', true)
   t.after(() => setSwitch('phoneReminders', false))
-  assert.equal(phoneItems(db, { decisionAvailable: false }).items.find(row => row.id === 'proof').done, true)
+  assert.equal(phoneItems(db, { decisionAvailable: false }).items.find(row => row.id === 'proof').done, undefined)
 })
 
 test('schema migration preserves explicit owner marks but not inferred ones', t => {
@@ -154,8 +156,8 @@ test('native reminder sync requires the verified completion policy', () => {
   const source = readFileSync('../app/PhoneSync.swift', 'utf8')
   assert.match(source, /answer.completionPolicy == "owner-verified" && answer.close.contains/)
   const ui = readFileSync('../app/Orb.swift', 'utf8')
-  assert.match(ui, /card.looksDone \? "Confirm" : "Mark done"/)
-  assert.match(ui, /if card.looksDone/)
+  assert.match(ui, /card.needsConfirmation \? "Confirm" : "Mark done"/)
+  assert.match(ui, /if card.needsConfirmation/)
 })
 
 test('an AI session claim is model evidence and cannot close an original reminder', async t => {
@@ -199,6 +201,14 @@ test('legacy owner evidence cannot write back because its source was not recorde
   const { db, reminder, card } = fixture(t)
   db.prepare(`insert into task_state (item_id, status, changed_at, completion_origin)
     values (?, 'handled', ?, 'owner-evidence')`).run(card().id, now())
+  assert.equal(card().state, 'looks_done')
+  assert.deepEqual(syncReminders(db, [reminder]).close, [])
+})
+
+
+test('imported owner-message state alone cannot authorize native write-back', t => {
+  const { db, reminder, card } = fixture(t)
+  db.prepare("insert into task_state(item_id,status,changed_at,completion_origin) values (?,'handled',?,'owner-message')").run(card().id, now())
   assert.equal(card().state, 'looks_done')
   assert.deepEqual(syncReminders(db, [reminder]).close, [])
 })

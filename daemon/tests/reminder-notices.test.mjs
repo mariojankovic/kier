@@ -34,7 +34,7 @@ test('reconciliation hides automatic reminder echoes without changing raw notice
     ['auto-handled', 'com.apple.reminders', 'handled'],
     ['mail-notice', 'com.apple.mail', null],
   ]) { notice(db, id, { app }); tagged(db, id, { status }) }
-  notice(db, 'direct-mail', { source: 'mail' }); tagged(db, 'direct-mail')
+  notice(db, 'direct-mail', { source: 'mail' }); tagged(db, 'direct-mail:copy:received')
   const raw = db.prepare('select * from items order by id').all()
   const states = db.prepare('select * from task_state order by item_id').all()
   assert.equal(excludeReminderNotices(db), 2)
@@ -43,7 +43,7 @@ test('reconciliation hides automatic reminder echoes without changing raw notice
   for (const id of ['automatic', 'auto-handled']) {
     assert.equal(tags[id].is_task, 0); assert.equal(tags[id].model, 'reminder-notice')
   }
-  for (const id of ['mail-notice', 'direct-mail']) assert.equal(tags[id].is_task, 1)
+  for (const id of ['mail-notice', 'direct-mail:copy:received']) assert.equal(tags[id].is_task, 1)
   assert.deepEqual(db.prepare('select * from items order by id').all(), raw)
   assert.deepEqual(db.prepare('select * from task_state order by item_id').all(), states)
 })
@@ -75,5 +75,5 @@ test('stored untagged Reminders notices never reach the model regardless of thei
   notice(db, 'mail', { app: 'com.apple.mail' })
   notice(db, 'plain-notification', { app: null })
   notice(db, 'direct-mail', { source: 'mail' })
-  assert.deepEqual(pending(db, 20).map(r => r.id).sort(), ['direct-mail', 'mail', 'plain-notification'])
+  assert.deepEqual(pending(db, 20).map(r => r.id).sort(), ['direct-mail:copy:received', 'mail', 'plain-notification'])
 })

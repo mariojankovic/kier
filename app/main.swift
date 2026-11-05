@@ -37,6 +37,16 @@ if !bundled, let data = ProcessInfo.processInfo.environment["KIER_DATA_DIR"] {
 // Opened from Finder: the daemon owns Kier's window, so this copy only says which page to show, then quits.
 let output = Pipe()
 if args.first == "open" { child.standardOutput = output }
+// Run owns private credential pipes. The environment flag contains no secret.
+let vaultInput = Pipe(), vaultOutput = Pipe()
+let vaultDirectory = child.environment?["KIER_DATA_DIR"] ?? FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Application Support/Kier"
+let gmailVault = GmailVault(directory: vaultDirectory, bundled: bundled)
+if daemon {
+  child.standardInput = vaultInput
+  child.standardOutput = vaultOutput
+  child.environment?["KIER_NATIVE_VAULT"] = bundled ? "1" : "0"
+  gmailVault.serve(output: vaultOutput.fileHandleForReading, input: vaultInput.fileHandleForWriting)
+}
 child.terminationHandler = { process in
   if args.first == "open", process.terminationStatus == 0 {
     let page = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "/"
@@ -45,6 +55,9 @@ child.terminationHandler = { process in
   exit(process.terminationStatus)
 }
 do {
+  if daemon && bundled {
+    try gmailVault.prepareForLaunch(node: URL(fileURLWithPath: node), daemon: URL(fileURLWithPath: root + "/bin/kier.mjs"))
+  }
   try child.run()
 } catch {
   FileHandle.standardError.write("Kier could not start \(node): \(error)\n".data(using: .utf8)!)

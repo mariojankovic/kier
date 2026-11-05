@@ -51,7 +51,7 @@ extension Card {
 
   var kicker: String {
     // One of your own reminders ("Your reminders" in Setup): its list, not a chat.
-    if source == "reminders" { return looksDone ? "Looks done" : "Your reminder in \(thread ?? "Reminders")" }
+    if source == "reminders" { return needsConfirmation ? suggestionLabel : "Your reminder in \(thread ?? "Reminders")" }
     let when = "\(dateLabel(ts)) \(timeLabel(ts))"
     let who = self.who
     // A reply on Threads or X is filed under its conversation's id ("Threads:4020…"): the site is the place.
@@ -534,7 +534,7 @@ struct CardRow: View {
 
   private func details(_ kind: Kind) -> some View {
     VStack(alignment: .leading, spacing: hero ? 6 : 3) {
-      Text((card.looksDone ? "Looks done" : kind.label) + (card.due.flatMap { $0.isEmpty ? nil : ", " + dayLabel($0) } ?? ""))
+      Text((card.needsConfirmation ? card.suggestionLabel : kind.label) + (card.due.flatMap { $0.isEmpty ? nil : ", " + dayLabel($0) } ?? ""))
         .font(.kierSmall).foregroundStyle(Kier.faint)
       HStack(alignment: .firstTextBaseline, spacing: 8) {
         Text(card.headline).font(hero ? .kierHeadline : .kierCardTitle).fixedSize(horizontal: false, vertical: true)
@@ -545,7 +545,7 @@ struct CardRow: View {
         Text("“\(said.replacingOccurrences(of: "\n", with: " / "))”").font(.system(size: hero ? 14.5 : 13)).foregroundStyle(Kier.dim).lineLimit(hero ? 3 : 2)
       }
       Text(origin).font(.kierSmall).foregroundStyle(Kier.faint)
-      if card.state == "handled" || card.looksDone, let reason = card.reason {
+      if card.state == "handled" || card.needsConfirmation, let reason = card.reason {
         Label(reason, systemImage: "checkmark.seal").font(.kierSmall).foregroundStyle(.green).lineLimit(2)
       } else if let hint = card.hint {
         // A commit made right after the promise that may be the fix: one click confirms it.
@@ -560,9 +560,9 @@ struct CardRow: View {
 
   @ViewBuilder private func actions(_ kind: Kind) -> some View {
     HStack(spacing: 14) {
-      if card.looksDone {
-        Button("Confirm") { store.mark(card, "done") }.buttonStyle(PillButton(prominent: true))
-        Button("Not done") { store.mark(card, "open") }.buttonStyle(TextButton())
+      if card.needsConfirmation {
+        Button("Confirm") { store.mark(card, card.confirmStatus) }.buttonStyle(PillButton(prominent: true))
+        Button(card.looksUnneeded ? "Keep" : "Not done") { store.mark(card, "open") }.buttonStyle(TextButton())
       } else if card.state == "handled" {
         Button("Not done") { store.mark(card, "open") }.buttonStyle(PillButton(prominent: true))
         Button { store.mark(card, "done") } label: { Label("Mark done", systemImage: "checkmark") }.buttonStyle(TextButton())
@@ -831,8 +831,8 @@ struct ContextView: View {
       if let c = store.context {
         VStack(alignment: .leading, spacing: 16) {
           VStack(alignment: .leading, spacing: 2) {
-            Text(c.item.thread ?? sourceName(c.item.source)).font(.headline)
-            Text("\(sourceName(c.item.source)), \(dateLabel(c.item.ts)) \(timeLabel(c.item.ts))").font(.caption).foregroundStyle(.secondary)
+            Text(c.item.conversationLabel).font(.headline)
+            Text("\(c.item.originLabel), \(dateLabel(c.item.ts)) \(timeLabel(c.item.ts))").font(.caption).foregroundStyle(.secondary)
           }
           if c.item.source == "ai" { SessionOpenButton(id: c.item.id) }
           if let tag = c.tag { why(tag) }
@@ -1008,9 +1008,9 @@ struct ItemRow: View {
       IconTile(symbol: sourceSymbol(item.source), brand: item.brand, tint: task ? Kier.periLight : Kier.dim, size: 26).padding(.top, 1)
       VStack(alignment: .leading, spacing: 3) {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Text(item.thread ?? "").font(.system(size: 13, weight: .medium))
+          Text(item.conversationLabel).font(.system(size: 13, weight: .medium))
           if !who.isEmpty && who != item.thread { Text(who).font(.system(size: 13)).foregroundStyle(Kier.dim) }
-          Text(sourceName(item.source)).font(.system(size: 12)).foregroundStyle(Kier.faint)
+          Text(item.originLabel).font(.system(size: 12)).foregroundStyle(Kier.faint)
           if task { Text("Task").font(.system(size: 11.5, weight: .medium)).foregroundStyle(Kier.periLight) }
           Spacer(minLength: 8)
           Text((withDay ? dateLabel(item.ts) + " " : "") + timeLabel(item.ts)).font(.kierSmall.monospacedDigit()).foregroundStyle(Kier.faint)
@@ -1091,7 +1091,7 @@ struct VaultView: View {
                 IconTile(symbol: sourceSymbol(i.source), brand: i.brand, size: 26)
                 VStack(alignment: .leading, spacing: 2) {
                   Text(i.text ?? "").font(.kierBody).lineLimit(1)
-                  Text("\(dateLabel(i.ts)), \(i.thread ?? ""), \(sourceName(i.source))").font(.kierSmall).foregroundStyle(Kier.faint)
+                  Text("\(dateLabel(i.ts)), \(i.conversationLabel), \(i.originLabel)").font(.kierSmall).foregroundStyle(Kier.faint)
                 }
                 Spacer(minLength: 12)
                 Button("Forget") {
@@ -1266,7 +1266,7 @@ struct SetupView: View {
   }
   private let permissionIDs = ["fda", "screen"]
   private let syncIDs = ["phonecal", "phonerem", "myrem"]
-  private let connectionIDs = ["claude", "imessage", "calls", "calendar", "whatsapp", "notifications", "eyes", "chatapps", "mail"]
+  private let connectionIDs = ["claude", "imessage", "calls", "calendar", "whatsapp", "notifications", "eyes", "chatapps", "mail", "gmail"]
 
   var body: some View {
     VStack(spacing: 0) {
@@ -1333,6 +1333,7 @@ struct SetupView: View {
     }
     setupSteps("Calendar & Reminders", steps: store.steps.filter { syncIDs.contains($0.id) })
     setupSteps("Connected apps", steps: store.steps.filter { connectionIDs.contains($0.id) })
+    MCPSourcesView()
   }
 
   private var aboutYou: some View {
@@ -1714,5 +1715,105 @@ struct ModelPanel: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.vertical, 11)
+  }
+}
+
+
+struct MCPSourcesView: View {
+  @Environment(Store.self) var store
+  @State private var sources: [MCPSource] = []
+  @State private var name = ""
+  @State private var endpoint = ""
+  @State private var error: String?
+  @State private var busy = false
+
+  var body: some View {
+    Panel(title: "MCP sources", footer: "Off until you enable a source. Kier sends your chosen tool name and JSON arguments to that server every 10 minutes. HTTP goes directly to its URL. Local commands may contact services using the credentials you configure. Results stay on this Mac; nothing goes to a Kier server. Choose servers and read tools you trust. On timeout or daemon exit, Kier kills the process group, observed descendants and detached children retaining its inherited marker. Local programs can evade cleanup by clearing the marker and detaching before observation; this is not a sandbox.") {
+      ForEach(sources) { source in
+        MCPSourceRow(source: source) { sources = await store.mcpSources() }
+      }
+      VStack(alignment: .leading, spacing: 10) {
+        TextField("Source name", text: $name)
+        TextField("HTTPS URL, http://127.0.0.1 URL, or command with arguments", text: $endpoint)
+        Button(busy ? "Adding..." : "Add source") {
+          Task {
+            busy = true
+            let reply = await store.mcpAction("", ["name": name, "endpoint": endpoint])
+            error = reply?.ok == true ? nil : reply?.error ?? "Could not add the source."
+            if reply?.ok == true { name = ""; endpoint = ""; sources = await store.mcpSources() }
+            busy = false
+          }
+        }.disabled(busy || name.isEmpty || endpoint.isEmpty)
+        if let error { Text(error).font(.kierSmall).foregroundStyle(.red) }
+        Text("For per-server environment variables, edit mcpSources in config.json. Commands run directly, without a shell. Tool arguments are sent exactly as entered.").font(.kierSmall).foregroundStyle(Kier.dim)
+      }.padding(.vertical, 12)
+    }.task { sources = await store.mcpSources() }
+  }
+}
+
+struct MCPSourceRow: View {
+  @Environment(Store.self) var store
+  let source: MCPSource
+  let reload: () async -> Void
+  @State private var tools: [MCPTool] = []
+  @State private var tool = ""
+  @State private var arguments = "{}"
+  @State private var error: String?
+  @State private var busy = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        VStack(alignment: .leading) {
+          Text(source.name).font(.kierCardTitle)
+          Text(source.destination).font(.kierSmall).foregroundStyle(Kier.dim)
+        }
+        Spacer()
+        Toggle("On", isOn: Binding(get: { source.enabled }, set: { on in
+          Task { await action("", ["id": source.id, "enabled": on]) }
+        })).disabled(busy || source.tool.isEmpty)
+        Button("Remove") { Task { await action("", ["id": source.id, "remove": true]) } }.disabled(busy)
+      }
+      HStack {
+        Button(busy ? "Working..." : "List read tools") {
+          Task {
+            busy = true
+            let reply = await store.mcpAction("/tools", ["id": source.id])
+            tools = reply?.tools ?? []
+            error = reply?.ok == true ? (tools.isEmpty ? "No tools marked read only were found." : nil) : reply?.error ?? "Could not list tools."
+            busy = false
+          }
+        }.disabled(busy)
+        if !tools.isEmpty {
+          Picker("Read tool", selection: $tool) {
+            Text("Choose a tool").tag("")
+            ForEach(tools) { Text($0.name).tag($0.name) }
+          }
+        } else if !source.tool.isEmpty { Text(source.tool).font(.kierSmall) }
+        Button("Sync now") { Task { await action("/sync", ["id": source.id]) } }.disabled(busy || !source.enabled)
+      }
+      if let selected = tools.first(where: { $0.name == tool }) {
+        Text(selected.description).font(.kierSmall).foregroundStyle(Kier.dim)
+      }
+      TextField("Tool arguments as a JSON object", text: $arguments, axis: .vertical).lineLimit(2...5)
+      Button("Save read tool") {
+        Task {
+          guard let data = arguments.data(using: .utf8), let args = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            error = "Arguments must be a JSON object."; return
+          }
+          await action("", ["id": source.id, "tool": tool, "arguments": args])
+        }
+      }.disabled(busy || tool.isEmpty)
+      if let error { Text(error).font(.kierSmall).foregroundStyle(.red) }
+    }.padding(.vertical, 12)
+      .task(id: source.id) { tool = source.tool; arguments = source.arguments }
+  }
+
+  private func action(_ path: String, _ body: [String: Any]) async {
+    busy = true
+    let reply = await store.mcpAction(path, body)
+    error = reply?.ok == true ? nil : reply?.error ?? "Could not update this source."
+    await reload()
+    busy = false
   }
 }

@@ -8,14 +8,14 @@ after(()=>rmSync(process.env.KIER_DATA_DIR,{recursive:true,force:true}))
 const {open,addItems,now}=await import('../lib/db.mjs')
 const {config}=await import('../lib/config.mjs')
 const {phoneItems}=await import('../lib/phone.mjs')
-const {today}=await import('../lib/tasks.mjs')
+const {today,markTask}=await import('../lib/tasks.mjs')
 config.phoneReminders=true
 config.phoneCalendar=false
 function card(t,{second=null,own=false,confirmed=null,status=null}={}){
  const db=open(':memory:');t.after(()=>db.close())
  addItems(db,[{id:'message',source:'whatsapp',thread:'Nika',sender:own?config.me:'Nika',fromMe:own,ts:now()-120,text:'At noon',meta:{group:false}}])
  db.prepare("insert into tags(item_id,is_task,due,summary,card,model,tagged_at,second,confirmed) values ('message',1,?,'Meet at noon','appointment','test',?,?,?)").run(today(),now(),second,confirmed)
- if(status)db.prepare("insert into task_state(item_id,status,changed_at,reason) values ('message',?,?,'owner choice')").run(status,now())
+ if(status)markTask(db,'message',status)
  return db
 }
 test('a decision-model veto keeps an incoming guess out of Reminders',t=>{

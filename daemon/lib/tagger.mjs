@@ -1,3 +1,4 @@
+import { evidenceLine, evidenceMeta, evidenceRecord, evidenceTrust, EVIDENCE_RULE, untrustedBlock } from './evidence-trust.mjs'
 import { parseModelJSON } from './errors.mjs'
 import { modelFetch } from './model-provider.mjs'
 import { groundedTitle } from './title-grounding.mjs'
@@ -135,7 +136,7 @@ const ATTENTION_SHOTS = [
   [fmt('Notification', `shown by a resource monitor on ${N}'s Mac`, `Memory warning (incoming, to ${N})`, 'Tue 2026-06-16 14:20', 'Memory warning: sample-worker has stayed over 9 GB for 6 minutes while exporting the recipe catalogue. Review the active render job.'),
     ans(true, '', '', '', 3, 'Investigate sample-worker memory use during the recipe catalogue export')],
 ]
-const PREFIX = [{ role: 'system', content: SYSTEM }, ...[...SHOTS, ...ATTENTION_SHOTS].flatMap(([u, a]) => [{ role: 'user', content: u }, { role: 'assistant', content: a }])]
+const PREFIX = [{ role: 'system', content: SYSTEM + '\n' + EVIDENCE_RULE }, ...[...SHOTS, ...ATTENTION_SHOTS].flatMap(([u, a]) => [{ role: 'user', content: u }, { role: 'assistant', content: a }])]
 
 const parts = (ts, opts) => new Intl.DateTimeFormat('en-GB', { timeZone: config.timezone, hour12: false, ...opts })
   .formatToParts(new Date(ts * 1000)).reduce((o, p) => ({ ...o, [p.type]: p.value }), {})
@@ -147,7 +148,7 @@ const sentLabel = (ts) => {
 export function contextLine(c, itemTs) {
   const p = parts(c.ts, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
   const same = sentLabel(c.ts).slice(0, 14) === sentLabel(itemTs).slice(0, 14)
-  return { time: same ? `${p.hour}:${p.minute}` : `${p.weekday} ${p.day} ${p.month} ${p.hour}:${p.minute}`, from: c.from_me ? config.me : c.sender, text: c.text || '' }
+  return { trust: evidenceTrust(c), time: same ? `${p.hour}:${p.minute}` : `${p.weekday} ${p.day} ${p.month} ${p.hour}:${p.minute}`, from: c.from_me ? config.me : c.sender, text: c.text || '' }
 }
 
 // Tag a thought typed across several short messages once, after the burst and immediate
@@ -258,8 +259,8 @@ const convo = (r) => {
 export const sameConversation = (item) => (r) => item.source !== 'notifications' || convo(r) === convo(item)
 
 // The messages just before this one in the same chat, oldest first.
-export function contextFor(db, item, limit = CONTEXT_MESSAGES) {
-  const rows = db.prepare(`select sender, from_me, ts, text from items where source = ? and thread = ?
+export function contextFor(db, item, limit = CONTEXT_MESSAGES, { evidenceLabels = false } = {}) {
+  const rows = db.prepare(`select * from items where source = ? and thread = ?
     and (ts < ? or (ts = ? and rowid < coalesce((select rowid from items where id = ?), 0))) and ts > ? and id != ?
     order by ts desc, rowid desc limit ${Number(limit) * (item.source === 'notifications' ? 20 : 1)}`).all(item.source, item.thread, item.ts, item.ts, item.id, item.ts - (CONTEXT_WINDOW[item.source] || 12 * 3600), item.id)
     .filter(sameConversation(item)).slice(0, Number(limit)).reverse()
@@ -267,11 +268,11 @@ export function contextFor(db, item, limit = CONTEXT_MESSAGES) {
   const topic = CHATS.has(item.source) ? rows.findLastIndex((r) => /^\s*(?:btw|by\s+the\s+way)\b/i.test(r.text || '')) : -1
   if (topic >= 0) rows.splice(0, topic)
   if (topic < 0 && rows.length && CHATS.has(item.source) && !rows.some((r) => (r.text || '').length > ANCHOR)) {
-    const paste = db.prepare(`select sender, from_me, ts, text from items where source = ? and thread = ? and ts < ? and ts > ? and length(text) > ?
+    const paste = db.prepare(`select * from items where source = ? and thread = ? and ts < ? and ts > ? and length(text) > ?
       order by ts desc limit 1`).get(item.source, item.thread, rows[0].ts, item.ts - ANCHOR_WINDOW, ANCHOR)
     if (paste) rows.unshift({ ...paste, text: ends(paste.text.replace(/\s+/g, ' ')), long: true })
   }
-  return rows.map((c) => ({ ...contextLine(c, item.ts), ...(c.long && { long: true }) }))
+  return rows.map((c) => ({ ...contextLine(c, item.ts), ...(evidenceLabels && { evidence: evidenceLine(c, String(c.text || '').slice(0, 240)) }), ...(c.long && { long: true }) }))
 }
 
 // A short direct-chat answer can exceed the old per-line threshold through run-on
@@ -282,7 +283,7 @@ export function contextForTag(db, item, text = item.text) {
   const direct = ['whatsapp', 'imessage'].includes(item.source)
     || ['discord', 'chat'].includes(item.source) && meta.group === false
   if (!item.from_me && direct && !meta.group && String(text || '').trim().length <= 320) {
-    const previous = db.prepare(`select sender, from_me, ts, text from items where source = ? and thread = ?
+    const previous = db.prepare(`select * from items where source = ? and thread = ?
       and (ts < ? or (ts = ? and rowid < coalesce((select rowid from items where id = ?), 0)))
       and ts >= ? order by ts desc, rowid desc limit 1`).get(item.source, item.thread, item.ts, item.ts, item.id, item.ts - 180)
     if (previous?.from_me && String(previous.text || '').length <= 320) {
@@ -295,7 +296,7 @@ export function contextForTag(db, item, text = item.text) {
 export function prompt(item, context = [], after = []) {
   const discord = discordMessage(item)
   if (discord) item = { ...item, sender: discord.sender, text: discord.text }
-  const meta = item.meta ? JSON.parse(item.meta) : {}
+  const meta = evidenceMeta(item)
   const where = item.source === 'mail' ? `to ${meta.to || 'me'}` : item.source === 'notifications' ? `shown by the ${item.thread} app on ${N}'s Mac`
     : item.source === 'social' ? (meta.site === 'LinkedIn' ? `a LinkedIn conversation with ${item.from_me ? meta.replyTo || 'someone' : item.sender}` : 'public replies under a post')
     // Treat a group title as a label, not as the subject of every message. Use the profile’s
@@ -305,7 +306,9 @@ export function prompt(item, context = [], after = []) {
   const known = CHATS.has(item.source) ? slice({ people: [item.sender, ...context.map((c) => c.from), ...after.map((c) => c.from)], group: meta.group ? item.thread : null }) : ''
   // Normalize exclamations for the model so they cannot be mistaken for product or person names.
   const calm = (cs) => cs.map((c) => ({ ...c, text: calmed(c.text) }))
-  return fmt(item.source === 'social' ? meta.site : label[item.source], where, who(item), sentLabel(item.ts), calmed(item.text), calm(context), calm(after), known)
+  const rows = cs => calm(cs).map(c => ({ ...(c.trust || evidenceTrust({ source: item.source })), sender: c.from, time: c.time, text: c.text }))
+  return untrustedBlock({ item: evidenceRecord(item, calmed(item.text)), where, sent: sentLabel(item.ts), known,
+    'Earlier in this chat (context only):': rows(context), 'Right after it (context only):': rows(after) })
 }
 
 export async function ollamaUp() {
@@ -353,6 +356,7 @@ export function pending(db, limit) {
   const marks = TAGGED_SOURCES.map(() => '?').join(', ')
   return db.prepare(`select i.* from items i left join tags t on t.item_id = i.id
     where t.item_id is null and i.source in (${marks}) and i.ts > ? and json_extract(i.meta, '$.quiet') is null
+    and coalesce(json_extract(i.meta, '$.ownerCreated'), 0) != 1
     and (i.source != 'notifications' or lower(coalesce(json_extract(i.meta, '$.app'), '')) != 'com.apple.reminders')
     and (i.source not in ('whatsapp', 'imessage', 'discord', 'chat', 'social') or i.ts < ?) order by i.ts desc limit ?`)
     .all(...TAGGED_SOURCES, now() - config.tagBackfillDays * 86400, now() - SETTLE, limit)
@@ -505,7 +509,7 @@ async function askAbout(system, item, context) {
   const res = await modelFetch('/api/chat', {
     method: 'POST', signal: AbortSignal.timeout(120000),
     body: JSON.stringify({ model: config.model, stream: false, think: false, keep_alive: config.keepAlive, options: { temperature: 0, num_ctx: 4096 },
-      messages: [{ role: 'system', content: system }, { role: 'user', content: `${lines ? `The chat before it:\n${lines}\n\n` : ''}${item.sender}: ${item.text}` }] }),
+      messages: [{ role: 'system', content: system + '\n' + EVIDENCE_RULE }, { role: 'user', content: prompt(item, context) }] }),
   })
   if (!res.ok) return null
   return parseModelJSON((await res.json()).message.content.match(/\{[\s\S]*\}/)?.[0] ?? 'null')
@@ -550,7 +554,7 @@ async function mentionAsk(item, context) {
   const res = await modelFetch('/api/chat', {
     method: 'POST', signal: AbortSignal.timeout(120000),
     body: JSON.stringify({ model: config.model, stream: false, think: false, keep_alive: config.keepAlive, options: { temperature: 0, num_ctx: 4096 },
-      messages: [{ role: 'system', content: ASKED }, { role: 'user', content: `Chat before it:\n${lines}\n\n${item.sender} wrote:\n${item.text}` }] }),
+      messages: [{ role: 'system', content: ASKED + '\n' + EVIDENCE_RULE }, { role: 'user', content: prompt(item, context) }] }),
   })
   if (!res.ok) return null
   return parseModelJSON((await res.json()).message.content.match(/\{[\s\S]*\}/)?.[0] ?? 'null')
@@ -657,7 +661,7 @@ export function quietSenderPromises(db) {
 export async function doubleCheck(db, limit = 16) {
   const items = db.prepare(`select i.id, i.source, i.thread, i.sender, i.from_me, i.ts, i.meta, coalesce(t.said, i.text) text, t.amount, t.when_words
     from tags t join items i on i.id = t.item_id where t.is_task = 1 and (t.second is null or t.card is null) and i.ts > ?
-      and i.source != 'reminders' order by i.ts desc limit ?`).all(now() - 30 * 86400, limit)
+      and i.source not in ('reminders', 'kier') and coalesce(json_extract(i.meta, '$.ownerCreated'), 0) != 1 order by i.ts desc limit ?`).all(now() - 30 * 86400, limit)
   if (!items.length) return {}
   const checks = items.map(item => ({ ...item, context: contextForTag(db, burstOf(db, item).start, item.text) }))
   const p = await decide(checks).catch(() => null)
