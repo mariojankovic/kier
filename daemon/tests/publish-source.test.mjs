@@ -312,6 +312,8 @@ if [[ "$1" == attach ]]; then
   ln -s /Applications "$mountpoint/Applications"
 fi
 `, { mode: 0o755 })
+  // Notarization and Gatekeeper checks pass for the fixture build; a real release runs Apple's tools.
+  for (const tool of ['xcrun', 'spctl']) writeFileSync(join(f.bin, tool), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
   writeFileSync(join(f.bin, 'gh'), `#!/bin/sh
 printf '%s\\n' "$*" >> "$CALL_LOG"
 if [ "$2" = view ]; then exit 1; fi
@@ -387,4 +389,13 @@ test('release attaches only the frozen explicit list and detects subsequent tamp
   write(manifestPath, JSON.stringify(manifest))
   assert.notEqual(f.run('bash', [join(f.repo, 'scripts/publish-source.sh'), '1.2.3', '--validated', prepared]).status, 0)
   assert.ok(!existsSync(f.calls), 'a rewritten manifest bypassed the privacy scan')
+})
+
+test('a build without a stapled notarization ticket never reaches an upload', { skip: !available }, t => {
+  const f = releaseFixture(t)
+  writeFileSync(join(f.bin, 'xcrun'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+  const result = f.release()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /not notarized and stapled/)
+  assert.ok(!existsSync(f.calls) || !readFileSync(f.calls, 'utf8').includes('release create'), 'an unnotarized build was uploaded')
 })

@@ -175,6 +175,9 @@ def bundle(gate, app, source):
                     if not original.is_file() or not same_binary(path, original): raise ValueError('bundled Sparkle differs from its release')
                 elif not original.is_file() or path.read_bytes() != original.read_bytes():
                     raise ValueError('bundled Sparkle differs from its release')
+            elif rel == 'CodeResources':
+                # Apple's stapled notarization ticket: a signed blob, checked by stapler and Gatekeeper before upload.
+                names_only(gate, '\n'.join(privacy.strings(path.read_bytes())), label)
             elif rel == '_CodeSignature/CodeResources':
                 signature_manifest(gate, path, label)
             elif rel in ('MacOS/Kier', 'Resources/default.metallib'):

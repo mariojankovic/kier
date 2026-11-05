@@ -9,7 +9,11 @@ import { forgotten, keep, forgetKey } from './privacy.mjs'
 export function open(path = dbPath, { readOnly = false } = {}) {
   const db = new DatabaseSync(path, { readOnly })
   db.exec('pragma busy_timeout = 5000')
-  db.function('kier_origin_permitted', (source, thread, meta, disabled) => Number(permitsItem({ source, thread, meta }, JSON.parse(disabled))))
+  let lastOff, lastDisabled
+  db.function('kier_origin_permitted', (source, thread, meta, disabled) => {
+    if (disabled !== lastOff) { lastDisabled = JSON.parse(disabled); lastOff = disabled }
+    return Number(permitsItem({ source, thread, meta }, lastDisabled))
+  })
   db.function('kier_forget_key', { varargs: true }, (...parts) => forgetKey(...parts))
   if (readOnly) return db
   if (path !== ':memory:') for (const suffix of ['', '-wal', '-shm']) {

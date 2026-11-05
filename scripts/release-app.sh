@@ -20,6 +20,13 @@ case "${1:-}" in
   *) echo "release-app: unknown option" >&2; exit 2 ;;
 esac
 [[ -f dist/Kier.dmg ]] || { echo "release-app: missing package" >&2; exit 1; }
+# Only a notarized, stapled build that Gatekeeper accepts may be uploaded, however it was built.
+if ! $VALIDATE_ONLY; then
+  for item in dist/Kier.app dist/Kier.dmg; do
+    xcrun stapler validate "$item" >/dev/null 2>&1 || { echo "release-app: $item is not notarized and stapled" >&2; exit 1; }
+  done
+  spctl --assess --type open --context context:primary-signature dist/Kier.dmg >/dev/null 2>&1 || { echo "release-app: Gatekeeper rejects Kier.dmg" >&2; exit 1; }
+fi
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' app/Info.plist)"
 MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' app/Info.plist)"
 # What's new, from app/changelog.json (the same notes the app and getkier.com/changelog show).

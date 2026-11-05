@@ -50,7 +50,18 @@ export function adult(item) {
 }
 
 // Forgotten things are remembered only as a one-way hash, so the vault never says what was forgotten.
-export const forgetKey = (kind, ...parts) => createHash('sha256').update([kind, ...parts].join('\n')).digest('hex')
+// Every scoped read checks each row against the forgotten list, so a row's key is computed once and remembered.
+const forgetKeys = new Map()
+export const forgetKey = (kind, ...parts) => {
+  const input = [kind, ...parts].join('\n')
+  let key = forgetKeys.get(input)
+  if (key === undefined) {
+    key = createHash('sha256').update(input).digest('hex')
+    if (forgetKeys.size >= 200_000) forgetKeys.clear()
+    forgetKeys.set(input, key)
+  }
+  return key
+}
 
 export function forgotten(db) {
   return new Set(db.prepare('select key from forgotten').all().map((r) => r.key))
