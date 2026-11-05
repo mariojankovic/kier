@@ -68,7 +68,7 @@ test('repository identity is exempt only in the five exact approved paths', { sk
   const f = fixture(t)
   for (const [allowed, paths] of [
     [true, ['LICENSE', 'SECURITY.md', 'scripts/publish-source.sh', 'scripts/build-app.sh', 'scripts/package-app.sh']],
-    [false, ['README.md', 'daemon/tests/fixture.mjs', 'app/sample.swift', 'nested/LICENSE', 'nested/SECURITY.md', 'nested/scripts/build-app.sh', 'scripts/release-app.sh']],
+    [false, ['README.md', 'daemon/tests/fixture.mjs', 'app/sample.swift', 'nested/LICENSE', 'nested/SECURITY.md', 'nested/scripts/build-app.sh', 'scripts/release-app.sh', 'bundle/Contents/Info.plist', 'artifacts/appcast.xml']],
   ]) for (const path of paths) {
     const target = join(f.scan, path)
     write(target, `https://github.com/${identities.repository}\n`)

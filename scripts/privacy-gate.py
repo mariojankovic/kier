@@ -43,6 +43,8 @@ class Gate:
         if any(not isinstance(value, str) for value in identities.values()):
             raise ValueError('invalid identity exception')
         self.identities = identities
+        # Release artifacts that may name the public repository; only release validation sets these.
+        self.release_labels = set()
         self.errors = set()
         self.count = 0
         names_file = names_file or Path.home() / '.config/kier-public/names.txt'
@@ -99,7 +101,7 @@ class Gate:
         declaration = "IDENTITY_ALLOWLIST='" + json.dumps(self.identities, separators=(',', ':')) + "'"
         if path == 'scripts/publish-source.sh' and text == declaration:
             return ''
-        if path not in REPOSITORY_IDENTITY_FILES or not self.identities.get('repository'):
+        if (path not in REPOSITORY_IDENTITY_FILES and path not in self.release_labels) or not self.identities.get('repository'):
             return text
         repo = re.escape(self.identities['repository'])
         return re.sub(r'(?<![\w.])' + repo + r'(?![\w.-])', 'public-repository', text)
