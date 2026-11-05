@@ -422,6 +422,8 @@ def allowed(name):
     if any(s.startswith('.') or s in {'node_modules', '__pycache__'} for s in p.parts): return False
     if len(p.parts) == 1: return name in DOCUMENTS
     if p.parts[0] == 'app': return p.parts[:3] != ('app', 'icon', 'explorations')
+    # Images the README shows, and nothing else.
+    if p.parts[0] == 'docs': return len(p.parts) == 2 and p.suffix == '.png'
     if p.parts[0] == 'daemon':
         return p.parts[1] in {'lib', 'collectors', 'sidecar', 'ui', 'bin', 'tests'} or name in {'daemon/package.json', 'daemon/package-lock.json'}
     return p.parts[0] == 'scripts' and len(p.parts) == 2 and p.name in SCRIPTS

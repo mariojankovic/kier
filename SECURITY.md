@@ -2,7 +2,7 @@
 
 Report vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/mariojankovic/kier/security/advisories/new). Include the affected version, steps to reproduce, and the impact. Use invented data in examples and remove tokens, API keys and personal messages from attachments.
 
-Please do not put vulnerability details in a public issue. Reports are reviewed for the latest release.
+Please do not post vulnerability details publicly. Reports are reviewed for the latest release.
 
 Managed inference uses Unix sockets in the owner's private data directory. Kier checks directory and socket ownership and permissions before connecting; tokens and bounded requests add defense in depth. Other model endpoints require an explicit selection in Setup. Browser API access uses exact-origin header tokens and one-time bootstrap tickets; bearer cookies are not accepted. Child processes use controlled environments and resolved executable paths, and Python inference runs isolated.
 
