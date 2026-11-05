@@ -1,3 +1,4 @@
+import { ASK_DETAILS, createReminder, modelReminder, reminderIntent, reminderRequest } from './create-reminder.mjs'
 import { CODEX_UNAVAILABLE } from './ask-isolation.mjs'
 import { authorization, readScope, localAuthorization } from './authorization.mjs'
 import { parseModelJSON } from './errors.mjs'
@@ -269,6 +270,22 @@ export function renameTo(q) {
 export async function ask(db, q, agent = 'kier', history = [], item = null, on = QUIET) {
   // Fail before reading the vault, building a prompt, renaming a card or starting a process.
   if (agent === 'codex') return { agent, seconds: 0, unavailable: true, out: CODEX_UNAVAILABLE }
+  // A reply to "what should I remind you about?" is the reminder itself.
+  const answering = !item && history.at(-1)?.a === ASK_DETAILS
+  let request = !item && (reminderRequest(q) || (answering && reminderRequest(`remind me to ${q}`)))
+  if (!request && !item && (answering || reminderIntent(q))) {
+    const found = await modelReminder(answering ? `remind me to ${q}` : q, modelFetch, config.model).catch(() => null)
+    if (found?.needsDetails) { on.text?.(ASK_DETAILS); return { agent, seconds: 0, out: ASK_DETAILS } }
+    if (found) request = found
+  }
+  if (request) {
+    const reminder = createReminder(db, request)
+    if (!reminder) return { agent, seconds: 0, out: 'Could not add that reminder.' }
+    const out = `Added: ${reminder.title}${reminder.when ? `, ${reminder.when}` : ''}.`
+    on.text?.(out)
+    return { agent, seconds: 0, out, created: reminder.id,
+      actions: [{ id: reminder.id, status: 'dismissed', label: 'Undo', summary: reminder.title }] }
+  }
   globalThis.kierDb = readScope(db, localAuthorization())
   const t0 = Date.now()
   // Handle an explicit rename in a card’s chat directly, regardless of the selected assistant.

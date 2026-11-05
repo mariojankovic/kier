@@ -7,6 +7,7 @@ import { now } from './db.mjs'
 
 export const SOURCES = [
   { id: 'whatsapp', label: 'WhatsApp' },
+  { id: 'mail', label: 'Mail', detail: 'Personal mail from Apple Mail and Spark, read locally' },
   { id: 'imessage', label: 'Messages', detail: 'iMessage and SMS' },
   { id: 'discord', label: 'Discord', detail: 'Read from its window through Accessibility, in front or not' },
   { id: 'notifications', label: 'Notifications', detail: 'Mail and other apps, from Notification Center' },

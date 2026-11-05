@@ -121,3 +121,14 @@ test('Discord switch excludes historical screen captures and notifications from 
     assert.doesNotMatch(await f.call(tool, args), /ORIGIN_PRIVATE_FIXTURE/, tool)
   }
 })
+
+
+test('MCP mail scope and live Mail switch revocation filter every read tool', async t => {
+  const f = await fixture(t, ['mail'])
+  assert.match(await f.call('kier_item', { id: 'mail' }), /OFF_SCOPE_MARKER/)
+  const path = join(f.dir, 'config.json')
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), off: ['mail'] }))
+  for (const [tool, args] of [['kier_item', { id: 'mail' }], ['kier_search', { query: 'release notes' }], ['kier_tasks', { all: true }], ['kier_brief', {}], ['kier_day', {}]]) {
+    assert.doesNotMatch(await f.call(tool, args), /OFF_SCOPE_MARKER/, tool)
+  }
+})

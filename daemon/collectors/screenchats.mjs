@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { config, dataDir } from '../lib/config.mjs'
 import { addItems, cursor, setCursor } from '../lib/db.mjs'
 import { redact } from '../lib/redact.mjs'
+import { forget, readJson } from '../lib/file-cache.mjs'
 
 // Convert Accessibility captures into messages with author, time and conversation, including
 // outgoing messages absent from notifications. Carry the last speaker across small captures.
@@ -22,13 +23,14 @@ const CARRY = 15 * 60
 const HANDLES = resolve(dataDir, 'handles.json')
 
 // Learn the owner’s display name in a direct chat by excluding the named remote participant.
-export const handles = () => { try { return JSON.parse(readFileSync(HANDLES, 'utf8')) } catch { return {} } }
+export const handles = () => { try { return readJson(HANDLES) } catch { return {} } }
 function learn(app, name) {
   const h = handles()
   const mine = new Set(h[app] || [])
   if (mine.has(name)) return
   mine.add(name)
   writeFileSync(HANDLES, JSON.stringify({ ...h, [app]: [...mine] }, null, 2))
+  forget(HANDLES)
 }
 
 const owner = (app, name) => [config.me, ...(handles()[app] || [])].some((n) => n.toLowerCase() === String(name).toLowerCase())

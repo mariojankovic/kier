@@ -7,8 +7,11 @@ const plain = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').re
 
 // Weekdays, relative words and months for the owner's languages (lang.mjs).
 // Calendar date of a unix timestamp in the owner's timezone, as [year, month, day].
+const formats = new Map()
 export function localDate(ts, timeZone = config.timezone) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ts * 1000))
+  let format = formats.get(timeZone)
+  if (!format) { format = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }); formats.set(timeZone, format) }
+  const parts = format.format(new Date(ts * 1000))
   return parts.split('-').map(Number)
 }
 
@@ -18,13 +21,13 @@ const iso = (y, m, d) => {
 }
 const addDays = (y, m, d, n) => iso(y, m, d + n)
 
-function explicitDate(w, [y, m]) {
+function explicitDate(w, [y, m], months) {
   let hit = w.match(/\b(\d{1,2})\.\s?(\d{1,2})\.(?:\s?(\d{4}))?/)
   if (hit) return pick(Number(hit[3]) || null, Number(hit[2]), Number(hit[1]), y, m)
   hit = w.match(/\b(\d{1,2})\.?\s*([a-z]{3})[a-z]*\b/)
-  if (hit && MONTHS[hit[2]]) return pick(null, MONTHS[hit[2]], Number(hit[1]), y, m)
+  if (hit && months[hit[2]]) return pick(null, months[hit[2]], Number(hit[1]), y, m)
   hit = w.match(/\b([a-z]{3})[a-z]*\s+(\d{1,2})\b/)
-  if (hit && MONTHS[hit[1]]) return pick(null, MONTHS[hit[1]], Number(hit[2]), y, m)
+  if (hit && months[hit[1]]) return pick(null, months[hit[1]], Number(hit[2]), y, m)
   return null
 }
 
@@ -35,18 +38,18 @@ function pick(year, month, day, y, m) {
   return iso(year, month, day)
 }
 
-export function resolveDue(whenWords, modelDue, sentTs, text = '') {
+export function resolveDue(whenWords, modelDue, sentTs, text = '', { weekdays = WEEKDAYS, relative = RELATIVE, months = MONTHS, monthEnd = MONTH_END } = {}) {
   if (!whenWords) return ''
   const w = plain(whenWords).trim()
   // Grounding: the words must really be in the message, otherwise the date was invented.
   if (!w || !plain(text).includes(w)) return ''
   const [y, m, d] = localDate(sentTs)
-  const explicit = explicitDate(w, [y, m])
+  const explicit = explicitDate(w, [y, m], months)
   if (explicit) return explicit
-  for (const [offset, words] of RELATIVE) if (words.some((x) => w.includes(x))) return addDays(y, m, d, offset)
-  if (MONTH_END.test(w)) return iso(y, m + 1, 0)
+  for (const [offset, words] of relative) if (words.some((x) => w.includes(x))) return addDays(y, m, d, offset)
+  if (monthEnd.test(w)) return iso(y, m + 1, 0)
   const tokens = w.split(/[^a-z]+/)
-  for (const [day, stems] of WEEKDAYS) {
+  for (const [day, stems] of weekdays) {
     if (tokens.some((t) => stems.some((s) => t.startsWith(s) && (s.length > 3 || t === s)))) {
       const today = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
       // The same weekday named on that weekday means next week.

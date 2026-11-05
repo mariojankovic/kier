@@ -102,11 +102,16 @@ const DATES = {
     relative: [[2, ['overmorgen']], [1, ['morgen']], [0, ['vandaag', 'vanavond']]],
     months: { jan: 1, feb: 2, mrt: 3, apr: 4, mei: 5, jun: 6, jul: 7, aug: 8, sep: 9, okt: 10, nov: 11, dec: 12 } },
 }
-const mine = langs.map((l) => DATES[l]).filter(Boolean)
-export const WEEKDAYS = [1, 2, 3, 4, 5, 6, 0].map((d) => [d, mine.flatMap((x) => x.weekdays.find(([n]) => n === d)?.[1] || [])])
-export const RELATIVE = [2, 1, 0].map((o) => [o, mine.flatMap((x) => x.relative.find(([n]) => n === o)?.[1] || [])])
-export const MONTHS = Object.assign({}, ...mine.map((x) => x.months))
-export const MONTH_END = new RegExp(words('month').map(esc).join('|') || '(?!)')
+export function dateWords(languages = langs) {
+  const mine = languages.map(l => DATES[l]).filter(Boolean)
+  return {
+    weekdays: [1, 2, 3, 4, 5, 6, 0].map(d => [d, mine.flatMap(x => x.weekdays.find(([n]) => n === d)?.[1] || [])]),
+    relative: [2, 1, 0].map(o => [o, mine.flatMap(x => x.relative.find(([n]) => n === o)?.[1] || [])]),
+    months: Object.assign({}, ...mine.map(x => x.months)),
+    monthEnd: new RegExp(languages.flatMap(l => WORDS[l]?.month || []).map(esc).join('|') || '(?!)'),
+  }
+}
+export const { weekdays: WEEKDAYS, relative: RELATIVE, months: MONTHS, monthEnd: MONTH_END } = dateWords()
 
 // How prompts speak of the owner. Set `pronoun` in config.json; "they" until then.
 const PRONOUNS = {

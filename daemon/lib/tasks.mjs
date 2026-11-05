@@ -84,6 +84,7 @@ export function tasks(db, { days = 14, sources, auth = authorization(sources ?? 
     select i.id, i.rowid rid, i.source, i.thread, i.sender, i.from_me, i.ts, coalesce(t.said, i.text) text, i.text raw_text, i.url, i.meta, t.due, t.when_words, t.amount, t.urgency, t.summary, t.second, t.quiet, t.confirmed, t.card, t.hint, t.hint_url, t.model, s.status, s.reason, s.url evidence_url, s.changed_at done_at, s.completion_origin
     from tags t join items i on i.id = t.item_id left join task_state s on s.item_id = i.id
     where t.is_task = 1 and (i.ts > ? or t.due >= ? or s.changed_at > ?
+      or (i.source = 'kier' and (s.status is null or s.status in ('open', 'snoozed')))
       or (t.card = 'callback' and (s.status is null or s.status in ('open', 'snoozed')))) ${sourceFilter(sources)}
     order by i.ts desc`).all(now() - days * 86400, plusDays(t0, -days), now() - days * 86400)
   // Include later rows from the same minute: some sources provide minute-resolution timestamps.
@@ -138,7 +139,7 @@ export function tasks(db, { days = 14, sources, auth = authorization(sources ?? 
     }
     // Anything tied to a moment (being somewhere, a quick "reply now") has simply passed once its day is over.
     // Only promises, to-dos and payments can be forgotten, for a few days.
-    if (state === 'open' && r.due && r.due < t0) state = r.card === 'callback' || (!moment(r) && r.due >= plusDays(t0, -OVERDUE_DAYS)) ? 'overdue' : 'expired'
+    if (state === 'open' && r.due && r.due < t0) state = r.source === 'kier' ? 'overdue' : r.card === 'callback' || (!moment(r) && r.due >= plusDays(t0, -OVERDUE_DAYS)) ? 'overdue' : 'expired'
     // Summaries were written on the day the message came, so "tomorrow" goes stale; the card shows the date instead.
     if (r.summary) r.summary = r.summary.replace(/\s+(?:(?:by|until|before|on|for)\s+)?(today|tomorrow|tonight|this evening|this morning)\.?$/i, '')
     // Without a second opinion, keep the first model’s judgment. Owner promises, personal
@@ -242,7 +243,7 @@ export function brief(db, { sources, auth = authorization(sources ?? null) } = {
   const back = new Map(owed(db, live, now(), 24 * 60).map((o) => [o.card.id, o.at]))
   // Your own "I'll fix it" without a date is usually handled in the same conversation, so it only
   // stays in the brief for a day; requests from other people stay until answered or 3 days pass.
-  const recent = (t) => t.card === 'callback' || t.due || t.ts > now() - (t.from_me ? OWN_UNDATED_HOURS * 3600 : OVERDUE_DAYS * 86400) || back.has(t.id)
+  const recent = (t) => t.source === 'kier' || t.card === 'callback' || t.due || t.ts > now() - (t.from_me ? OWN_UNDATED_HOURS * 3600 : OVERDUE_DAYS * 86400) || back.has(t.id)
   const maybe = top(all.filter((t) => t.maybe && recent(t)))
   const forgotten = top(live.filter((t) => t.state === 'overdue' || (t.state === 'looks_done' && t.due && t.due < t0)))
   const open = top(live.filter((t) => !t.due && recent(t)), (t) => back.get(t.id) || t.ts)

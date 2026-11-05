@@ -185,7 +185,7 @@ final class PhoneSync {
       record(event, logicalID: item.id, kind: "event")
       return true
     }
-    if item.kind == "reminder", item.due != nil, let list {
+    if item.kind == "reminder", let list {
       let reminder = EKReminder(eventStore: ek)
       reminder.calendar = list
       fill(reminder, item)
@@ -226,7 +226,7 @@ final class PhoneSync {
     reminder.notes = item.notes
     reminder.dueDateComponents = dueParts(item)
     reminder.alarms?.forEach { reminder.removeAlarm($0) }
-    var at = dueParts(item) ?? DateComponents()
+    guard var at = dueParts(item) else { return }
     if at.hour == nil { at.hour = 9; at.minute = 0 }
     if let when = Calendar.current.date(from: at), when > Date() { reminder.addAlarm(EKAlarm(absoluteDate: when)) }
   }

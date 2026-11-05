@@ -344,8 +344,8 @@ enum Page: String, CaseIterable, Identifiable {
 }
 
 let sourceNames = [
-  "whatsapp": "WhatsApp", "imessage": "iMessage", "calls": "Calls", "calendar": "Calendar", "browser": "Web", "downloads": "Downloads",
-  "mail": "Email", "notifications": "Notifications", "clipboard": "Copied", "apps": "Apps", "screen": "On screen", "ai": "AI chats", "git": "Code",
+  "kier": "Kier", "whatsapp": "WhatsApp", "imessage": "iMessage", "calls": "Calls", "calendar": "Calendar", "browser": "Web", "downloads": "Downloads",
+  "mail": "Mail", "notifications": "Notifications", "clipboard": "Copied", "apps": "Apps", "screen": "On screen", "ai": "AI chats", "git": "Code",
   "discord": "Discord", "chat": "Chats", "social": "Threads and X",
 ]
 func sourceName(_ s: String) -> String { sourceNames[s] ?? s }
@@ -882,7 +882,10 @@ final class Store {
     }
     let turn = Turn(q: q, a: a, from: "\(names[agent] ?? agent), \(r["seconds"] as? Int ?? 0)s", actions: offered)
     // Renamed from its chat: the card's title follows at once.
-    if a.hasPrefix("Renamed it to") { Task { await loadBrief() } }
+    if a.hasPrefix("Renamed it to") || r["created"] is String {
+      Task { await loadBrief() }
+      if r["created"] is String { PhoneSync.shared.tick(force: true) }
+    }
     chats[key, default: []].append(turn)
     pending[key] = nil
     partial[key] = nil

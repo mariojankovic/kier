@@ -70,7 +70,7 @@ const defaults = {
   // What each AI may read through Kier: the conversations, calendar and work the tasks come from, and every read is
   // logged. Not the clipboard, which apps you used, your browsing or your downloads; an owner who
   // wants those shared adds them to scopes in config.json.
-  scopes: Object.fromEntries(['claude', 'codex', 'kier'].map((c) => [c, ['whatsapp', 'imessage', 'mail', 'calls', 'calendar', 'notifications', 'screen', 'discord', 'ai', 'git']])),
+  scopes: Object.fromEntries(['claude', 'codex', 'kier'].map((c) => [c, ['kier', 'whatsapp', 'imessage', 'mail', 'calls', 'calendar', 'notifications', 'screen', 'discord', 'ai', 'git']])),
   blockedChats: [],
   blockedDomains: ['1password.com', 'bitwarden.com', 'lastpass.com', 'dashlane.com', 'accounts.google.com', 'appleid.apple.com', 'revolut.com', 'paypal.com', 'wise.com', 'stripe.com', 'n26.com'],
 }

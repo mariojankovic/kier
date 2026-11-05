@@ -168,7 +168,7 @@ export async function describe(db, lines) {
 
 // Cards with no conversation of their own: an AI session's question, and one of your reminders, whose neighbours in its
 // list are other reminders, not a chat.
-const NO_CHAT = new Set(['ai', 'reminders'])
+const NO_CHAT = new Set(['ai', 'reminders', 'kier'])
 
 export function evidence(db, task, auth = localAuthorization()) {
   db = readScope(db, auth)
@@ -208,12 +208,24 @@ export function evidence(db, task, auth = localAuthorization()) {
         .filter((m) => PAID.test(m.text || '')).slice(0, 6).reverse()
         .map((m) => ({ kind: 'chat', owner: m.from_me === 1, ts: m.ts, line: `[${m.source === 'mail' ? 'email' : m.source}, ${m.thread}, ${clock(m.ts)}] ${m.from_me ? N : m.sender}: ${String(m.text || '').replace(/\s+/g, ' ').slice(0, 200)}` }))
     : []
+  // Sent mail can settle work requested in a different chat or in Ask. Keep
+  // recipients in the evidence so the model must match both person and action.
+  const sentMail = db.prepare(`select thread, ts, text, meta from items where source = 'mail' and from_me = 1
+    and ts > ? and ts <= ? and not (source = ? and thread = ?) order by ts desc limit 200`)
+    .all(task.ts, until, task.source, task.thread)
+    .filter(m => [...words(`${m.thread} ${m.text} ${m.meta || ''}`)].some(w => want.has(w))).slice(0, 8).reverse()
+    .map(m => {
+      const meta = metaOf(m)
+      const to = (meta.to || []).map(a => typeof a === 'string' ? a : a.name || a.email || '').join(', ')
+      return { kind: 'chat', owner: true, ts: m.ts,
+        line: `[email to ${to}, ${m.thread}, ${clock(m.ts)}] ${N}: ${String(m.text || '').replace(/\s+/g, ' ').slice(0, 400)}` }
+    })
   // What you told Kier about it in its chat ("I gave Claude this", "done"): your words, so the same rules apply.
   const told = db.prepare('select ts, q from chats where key = ? order by ts').all(task.id)
     .map((c) => ({ kind: 'kier', owner: true, ts: c.ts, line: `[${N} told Kier about it, ${clock(c.ts)}] ${N}: ${String(c.q).replace(/\s+/g, ' ').slice(0, 300)}` }))
   const screen = onScreen(db, task, until)
   const links = github([task.text, ...before, ...chat.map((c) => c.line)].join(' '))
-  return [...links, ...chat, ...paid, ...told, ...screen, ...work]
+  return [...links, ...chat, ...paid, ...sentMail, ...told, ...screen, ...work]
 }
 
 // An AI session as a line: what it's about, what you last asked it, and where it is now.

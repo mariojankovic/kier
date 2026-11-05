@@ -1,3 +1,4 @@
+import { mailSetup } from '../collectors/mail.mjs'
 import { modelFetch } from './model-provider.mjs'
 // The setup checklist: each step checks the real state of the Mac, so it turns green the moment
 // a permission is granted, and offers the one action that moves it forward.
@@ -132,6 +133,7 @@ export async function steps(db, eyes = {}) {
     return step('search', title, false, 'Find any message by what it means, in any language, and ask Kier things like "what did I tell Nika about the puzzle club?". One download of 1.1 GB, of which Kier keeps 185 MB; it runs on this Mac.', { id: 'embed', label: installing.error ? 'Try again' : 'Download' }, true)
   }
   const agreed = termsAccepted()
+  const mail = mailSetup()
   return [
     // Free and as is: the owner agrees to the terms of use once, and again when they change.
     step('terms', 'Terms of use', agreed,
@@ -195,7 +197,7 @@ export async function steps(db, eyes = {}) {
         : 'Lets Kier read conversations in apps like Discord while you have them open. Open the settings and turn on Kier under Accessibility.',
       { id: 'accessibility', label: 'Open settings' }, true),
     step('chatapps', 'Your messaging apps', false, chatApps(), viber ? null : { id: 'viber', label: 'Get Viber for Mac' }, true),
-    step('mail', 'Gmail', false, 'Coming next: needs a one time Google sign in. Until then, Spark\'s mail notifications reach Kier.', 'later'),
+    step('mail', 'Mail', mail.enabled && lastRun(db, 'mail')?.ok === 1, mail.detail, null, true),
   ]
 }
 

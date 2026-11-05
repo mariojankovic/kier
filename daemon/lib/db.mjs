@@ -116,21 +116,35 @@ export function setCursor(db, source, value) {
   db.prepare('insert into cursors (source, value) values (?, ?) on conflict(source) do update set value = excluded.value').run(source, String(value))
 }
 
-// Collectors hand over plain objects; existing ids are left untouched so tags survive a re-read.
+// Collectors hand over plain objects; existing ids keep their tags on a re-read.
 // Every source passes through here, so this is where adult content and forgotten things are dropped.
 export function addItems(db, all) {
   const gone = forgotten(db)
   const items = all.filter((i) => permitsItem(i) && keep(i, gone)).map(redactItem)
   const insert = db.prepare(`insert or ignore into items (id, source, thread, sender, from_me, ts, text, url, meta)
     values (:id, :source, :thread, :sender, :from_me, :ts, :text, :url, :meta)`)
+  // The same mail may arrive from two clients. A Sent copy can establish owner
+  // authority, and a plain snippet can enrich a subject-only copy, without new cards.
+  const mergeMail = db.prepare(`update items set
+    sender = case when from_me = 0 and ? = 1 then ? else sender end,
+    from_me = max(from_me, ?),
+    meta = case when (from_me = 0 and ? = 1) or (instr(coalesce(text, ''), char(10)) = 0 and instr(?, char(10)) > 0) then ? else meta end,
+    text = case when instr(coalesce(text, ''), char(10)) = 0 and instr(?, char(10)) > 0 then ? else text end
+    where id = ? and source = 'mail'`)
   let added = 0
   db.exec('begin')
   try {
     for (const i of items) {
-      added += Number(insert.run({
+      const inserted = Number(insert.run({
         id: i.id, source: i.source, thread: i.thread ?? null, sender: i.sender ?? null, from_me: i.fromMe ? 1 : 0,
         ts: i.ts, text: i.text ?? null, url: i.url ?? null, meta: i.meta ? JSON.stringify(i.meta) : null,
       }).changes)
+      added += inserted
+      if (!inserted && i.source === 'mail') {
+        const before = db.prepare('select text from items where id = ?').get(i.id)?.text
+        mergeMail.run(i.fromMe ? 1 : 0, i.sender ?? null, i.fromMe ? 1 : 0, i.fromMe ? 1 : 0, i.text ?? '', JSON.stringify(i.meta || {}), i.text ?? '', i.text ?? '', i.id)
+        if (before !== db.prepare('select text from items where id = ?').get(i.id)?.text) db.prepare('delete from vectors where item_id = ?').run(i.id)
+      }
     }
     db.exec('commit')
   } catch (e) {

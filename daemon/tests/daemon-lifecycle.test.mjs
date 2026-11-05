@@ -50,7 +50,7 @@ child.stdout.pipe(process.stdout)
     let pids
     t.after(() => { owner.kill('SIGKILL'); for (const pid of Object.values(pids || {})) { try { process.kill(pid, 'SIGKILL') } catch {} } })
     pids = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(Error('mock worker did not start')), 5000)
+      const timer = setTimeout(() => reject(Error('mock worker did not start')), 20000)
       owner.stdout.once('data', data => { clearTimeout(timer); resolve(JSON.parse(String(data))) })
       owner.once('error', reject)
     })

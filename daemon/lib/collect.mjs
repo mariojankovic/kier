@@ -7,6 +7,7 @@ import * as calendar from '../collectors/calendar.mjs'
 import * as calls from '../collectors/calls.mjs'
 import * as downloads from '../collectors/downloads.mjs'
 import * as git from '../collectors/git.mjs'
+import * as mail from '../collectors/mail.mjs'
 import * as imessage from '../collectors/imessage.mjs'
 import * as notifications from '../collectors/notifications.mjs'
 import * as screenchats from '../collectors/screenchats.mjs'
@@ -16,7 +17,7 @@ import { recordRun } from './db.mjs'
 import { isOff } from './settings.mjs'
 
 // screenchats reads what Eyes captured on screen, so it runs after everything else.
-export const collectors = [whatsapp, imessage, calls, calendar, notifications, browser, downloads, ai, git, screenchats]
+export const collectors = [whatsapp, imessage, mail, calls, calendar, notifications, browser, downloads, ai, git, screenchats]
 
 // A collector that fails (no permission, app not installed) never stops the others.
 export async function collectAll(db, only) {

@@ -24,10 +24,16 @@ export function phoneItems(db, { decisionAvailable = decisionInstalled() } = {})
   // Your own reminders are cards too ("Your reminders", reminders.mjs); they're in Reminders already.
   const canWrite = (t) => t.from_me || t.confirmed === 1 || ['open', 'snoozed', 'done'].includes(t.status)
     || t.second != null || !decisionAvailable
-  const dated = tasks(db).filter(canWrite).filter((t) => t.source !== 'reminders' && t.due && t.due <= until && (((t.state === 'open' || t.state === 'overdue') && !t.maybe && t.due >= t0) || (finished(t) && t.due >= plusDays(t0, -1))))
+  const eligible = (t) => {
+    if (t.source === 'reminders') return false
+    const open = ['open', 'overdue'].includes(t.state) && !t.maybe
+    if (t.source === 'kier') return open || finished(t)
+    return t.due && t.due <= until && ((open && t.due >= t0) || (finished(t) && t.due >= plusDays(t0, -1)))
+  }
+  const dated = tasks(db).filter(canWrite).filter(eligible)
     .filter((t) => !seen.has(t.summary) && seen.add(t.summary)).map((t) => ({
-      id: t.id, kind: 'reminder', title: t.summary, due: t.due, time: clockOf(t), ...(finished(t) && { done: true }),
-      notes: `${t.from_me ? 'You promised' : `${t.sender} asked you`}${SOURCE[t.source] ? `, on ${SOURCE[t.source]}` : ''}. Added by Kier.`,
+      id: t.id, kind: 'reminder', title: t.summary, due: t.due || null, time: clockOf(t), ...(finished(t) && { done: true }),
+      notes: `${t.source === 'kier' ? 'You asked Kier to remind you' : t.from_me ? 'You promised' : `${t.sender} asked you`}${SOURCE[t.source] ? `, on ${SOURCE[t.source]}` : ''}. Added by Kier.`,
     }))
   const calendar = phoneCalendar(), reminders = phoneReminders()
   // `on` is for an app from before the three switches, which knew only one.
