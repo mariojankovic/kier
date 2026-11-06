@@ -810,7 +810,7 @@ final class Store {
   func openSession(_ id: String, _ s: Handoff.Session, done: @escaping @MainActor (String?) -> Void) {
     // Straight to it by its address; looking for its row in Claude's sidebar is only for when there's none.
     if s.opensIn == "app", let link = s.link.flatMap(URL.init(string:)) {
-      done(LinkPolicy.open(link) ? nil : "Link is unavailable")
+      done(LinkPolicy.openSession(link) ? nil : "Link is unavailable")
       return
     }
     if s.opensIn == "app" { Deliver.open(session: s.title, done: done); return }

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.7.9",
+    "date": "2026-11-06",
+    "title": "Open in Claude works again",
+    "notes": [
+      "\"Open in Claude\" on a card from a Claude session opens that session again."
+    ],
+    "summary": "Open in Claude works again."
+  },
+  {
     "version": "0.7.8",
     "date": "2026-11-05",
     "title": "Answered chats stay closed",

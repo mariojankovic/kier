@@ -17,6 +17,20 @@ enum LinkPolicy {
     guard allows(url) else { return false }
     return NSWorkspace.shared.open(url)
   }
+
+  // "Open in Claude" or Codex: the session address Kier built from its own session records, never a link from a
+  // message. Only these exact shapes open; everything else still goes through the web-only rule above.
+  static func allowsSession(_ url: URL) -> Bool {
+    let text = url.absoluteString
+    return text.range(of: #"^claude://claude\.ai/epitaxy/[A-Za-z0-9_-]{1,80}$"#, options: .regularExpression) != nil
+      || text.range(of: #"^codex://threads/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"#, options: .regularExpression) != nil
+  }
+
+  @discardableResult
+  static func openSession(_ url: URL) -> Bool {
+    guard allowsSession(url) else { return false }
+    return NSWorkspace.shared.open(url)
+  }
 }
 
 func safeLink(_ text: String?) -> URL? {
