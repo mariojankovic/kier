@@ -47,21 +47,100 @@ if daemon {
   child.environment?["KIER_NATIVE_VAULT"] = bundled ? "1" : "0"
   gmailVault.serve(output: vaultOutput.fileHandleForReading, input: vaultInput.fileHandleForWriting)
 }
+// MARK: When Kier can't start
+
+// The background copy's last failure to start, so the login agent's restarts log it once and wait longer each time,
+// and opening Kier can say what went wrong.
+struct LaunchFailure: Codable { var message: String; var count: Int; var since: Double; var logged: Double }
+let failureURL = URL(fileURLWithPath: vaultDirectory).appendingPathComponent("launch-failure.json")
+func lastFailure() -> LaunchFailure? { (try? Data(contentsOf: failureURL)).flatMap { try? JSONDecoder().decode(LaunchFailure.self, from: $0) } }
+func launchLog(_ line: String) { FileHandle.standardError.write("\(line)\n".data(using: .utf8)!) }
+
+// The login agent restarts Kier whenever it exits. Without a pause and a memory of what was already said, a Kier that
+// can't start wrote the same line every ten seconds, for days.
+func failedToStart(_ message: String) -> Never {
+  let now = Date().timeIntervalSince1970
+  var failure = lastFailure().flatMap { $0.message == message ? $0 : nil } ?? LaunchFailure(message: message, count: 0, since: now, logged: 0)
+  failure.count += 1
+  if failure.count == 1 { launchLog("Kier could not start \(message)") }
+  else if now - failure.logged >= 3600 { launchLog("Kier still could not start \(message) (\(failure.count) tries since \(Date(timeIntervalSince1970: failure.since)))") }
+  if failure.count == 1 || now - failure.logged >= 3600 { failure.logged = now }
+  try? JSONEncoder().encode(failure).write(to: failureURL, options: .atomic)
+  // 10 s, 20 s, 40 s… up to five minutes between tries; opening Kier's Try Again starts the next one at once.
+  Thread.sleep(forTimeInterval: min(300, 10 * pow(2, Double(min(failure.count, 6) - 1))))
+  exit(1)
+}
+
+// Opened from Finder and nothing would happen: say so, with a way to try again or find the log.
+func showProblem(_ detail: String) -> Never {
+  let app = NSApplication.shared
+  app.setActivationPolicy(.accessory)
+  app.activate()
+  let alert = NSAlert()
+  alert.alertStyle = .critical
+  alert.messageText = "Kier couldn't start"
+  alert.informativeText = detail + "\n\nTry again, or look at the log to see what happened. If it keeps failing, download Kier again from getkier.com and replace the copy in Applications."
+  alert.addButton(withTitle: "Try Again")
+  alert.addButton(withTitle: "Show Log")
+  alert.addButton(withTitle: "Quit")
+  switch alert.runModal() {
+  case .alertFirstButtonReturn:
+    // Restart the background copy now rather than after its pause, then open Kier again.
+    let kick = Process()
+    kick.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    kick.arguments = ["kickstart", "-k", "gui/\(getuid())/com.getkier.agent"]
+    try? kick.run()
+    kick.waitUntilExit()
+    let again = Process()
+    again.executableURL = Bundle.main.executableURL
+    again.arguments = ["open"]
+    try? again.run()
+  case .alertSecondButtonReturn:
+    // Shown in Finder rather than opened: Kier only opens web links itself (LinkPolicy.swift).
+    let log = URL(fileURLWithPath: vaultDirectory).appendingPathComponent("kier.log")
+    NSWorkspace.shared.activateFileViewerSelecting([FileManager.default.fileExists(atPath: log.path) ? log : URL(fileURLWithPath: vaultDirectory)])
+  default: break
+  }
+  exit(1)
+}
+
+func launchProblem(_ error: Error) -> String {
+  let e = error as NSError
+  return e.domain == NSURLErrorDomain && e.code == NSURLErrorNoPermissionsToReadFile
+    ? "macOS would not run Kier's background part (error \(e.code)). This happens when files inside Kier.app were changed after it was installed."
+    : "Kier's background part would not run: \(e.localizedDescription)"
+}
+
 child.terminationHandler = { process in
   if args.first == "open", process.terminationStatus == 0 {
     let page = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "/"
     DistributedNotificationCenter.default().postNotificationName(.init("com.getkier.show"), object: page, userInfo: nil, deliverImmediately: true)
+  } else if args.first == "open" {
+    // The background copy never answered: usually because it can't start, which it has written down.
+    let reason = lastFailure().map { "Kier's background part has failed to start \($0.count == 1 ? "once" : "\($0.count) times") since \(Date(timeIntervalSince1970: $0.since).formatted(date: .omitted, time: .shortened))." }
+    DispatchQueue.main.async { showProblem(reason ?? "Kier's background part didn't answer.") }
+    return
   }
   exit(process.terminationStatus)
 }
+// Python run from inside the app once wrote bytecode caches beside the sidecars. That breaks Kier.app's signature, and
+// after a while macOS refuses to start the bundled Node, so Kier never opens. The sidecars run with -B now; a cache left
+// from before goes here, before Node starts.
+if bundled { try? FileManager.default.removeItem(atPath: root + "/sidecar/__pycache__") }
 do {
   if daemon && bundled {
     try gmailVault.prepareForLaunch(node: URL(fileURLWithPath: node), daemon: URL(fileURLWithPath: root + "/bin/kier.mjs"))
   }
   try child.run()
 } catch {
+  if daemon { failedToStart("\(node): \(error)") }
+  if args.first == "open" { showProblem(launchProblem(error)) }
   FileHandle.standardError.write("Kier could not start \(node): \(error)\n".data(using: .utf8)!)
   exit(1)
+}
+if daemon, let failure = lastFailure() {
+  launchLog("Kier started again after \(failure.count) failed \(failure.count == 1 ? "try" : "tries")")
+  try? FileManager.default.removeItem(at: failureURL)
 }
 
 var forwarders: [DispatchSourceSignal] = []

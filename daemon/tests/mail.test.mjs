@@ -29,7 +29,9 @@ function fixture(t) {
   const root = join(home, 'Library/Mail/V12')
   const applePath = join(root, 'MailData/Envelope Index')
   const sparkPath = join(home, 'Library/Application Support/Spark Mail/core-data/messages.sqlite')
+  const sweepPath = join(home, 'Library/Application Support/Sweep/sweep.db')
   mkdirSync(join(root, 'MailData'), { recursive: true }); mkdirSync(join(sparkPath, '..'), { recursive: true })
+  mkdirSync(join(sweepPath, '..'), { recursive: true })
   const apple = new DatabaseSync(applePath)
   apple.exec(`create table subjects (subject text); create table addresses (address text, comment text);
     create table mailboxes (url text, role text); create table recipients (message_id integer, address_id integer, type integer);
@@ -42,9 +44,16 @@ function fixture(t) {
   const spark = new DatabaseSync(sparkPath)
   spark.exec(`create table messages (subject text, shortBody text, messageFrom text, messageTo text, messageCc text, inSent integer,
     receivedDate real, creationDate real, conversationPk integer, messageId text, mailbox text, listUnsubscribe text)`)
+  const sweep = new DatabaseSync(sweepPath)
+  sweep.exec(`create table accounts (id integer primary key, email text not null, name text);
+    insert into accounts values (1, 'sam@example.test', 'Sam');
+    create table messages (id integer primary key, account_id integer not null, folder text not null, uid integer not null,
+      message_id text, thread_id text not null, from_name text, from_email text, to_json text, cc_json text, subject text,
+      date integer not null, snippet text, body_text text, seen integer not null default 0, pinned integer not null default 0,
+      done integer not null default 0, snoozed_until integer, bundle text, list_id text, has_attachments integer not null default 0)`)
   const db = open(':memory:')
-  t.after(() => { db.close(); apple.close(); spark.close() })
-  let appleSeq = 0, sparkSeq = 0
+  t.after(() => { db.close(); apple.close(); spark.close(); sweep.close() })
+  let appleSeq = 0, sparkSeq = 0, sweepSeq = 0
   function appleMessage({ subject = 'Contract', text = 'Please send the contract.', sent: outgoing = false, date = at - 60, id, headers = '', mime, body = true } = {}) {
     const pk = ++appleSeq
     const mid = id || `apple-${pk}@example.test`
@@ -66,15 +75,147 @@ function fixture(t) {
         to || JSON.stringify([{ name: sent ? 'Priya' : 'Sam', email: sent ? 'priya@example.test' : 'sam@example.test' }]), '[]', Number(sent), date, date, 20, id || `spark-${pk}@example.test`, sent ? 'Sent' : 'Inbox', list)
     return pk
   }
-  return { home, root, apple, spark, applePath, sparkPath, db, appleMessage, sparkMessage, stores: mailStores(home), inbox }
+  function sweepMessage({ subject = 'Sketch', text = 'Please send the sketch.', snippet = 'Please send the sketch.', sent = false,
+    date = at - 30, id, from, to, cc = [], list = '', folder = sent ? 'sent' : 'inbox' } = {}) {
+    const pk = ++sweepSeq
+    const sender = from || { name: sent ? 'Sam' : 'Priya', email: sent ? 'sam@example.test' : 'priya@example.test' }
+    sweep.prepare(`insert into messages(id,account_id,folder,uid,message_id,thread_id,from_name,from_email,to_json,cc_json,subject,date,snippet,body_text,list_id)
+      values (?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(pk, folder, pk, id || `sweep-${pk}@example.test`, 'thread-sketch', sender.name, sender.email,
+        JSON.stringify(to || [{ name: sent ? 'Priya' : 'Sam', email: sent ? 'priya@example.test' : 'sam@example.test' }]), JSON.stringify(cc), subject, date, snippet, text, list)
+    return pk
+  }
+  return { home, root, apple, spark, sweep, applePath, sparkPath, sweepPath, db, appleMessage, sparkMessage, sweepMessage, stores: mailStores(home), inbox }
 }
 
-test('detects both local clients and replaces the mail setup placeholder', t => {
+test('detects all three local clients and replaces the mail setup placeholder', t => {
   const f = fixture(t)
-  assert.deepEqual(f.stores.map(s => s.client), ['apple-mail', 'spark'])
-  assert.match(mailSetup(f.stores, false).detail, /Apple Mail and Spark/)
+  assert.deepEqual(f.stores.map(s => s.client), ['apple-mail', 'spark', 'sweep'])
+  assert.equal(f.stores.find(s => s.client === 'sweep').path, f.sweepPath)
+  // Sweep is read but not named until it's out.
+  assert.match(mailSetup(f.stores, false).detail, /from Apple Mail and Spark\./)
+  assert.doesNotMatch(mailSetup(f.stores, false).detail, /Sweep/)
+  assert.equal(mailSetup([f.stores[2]], false).found, true)
+  assert.match(mailSetup([f.stores[2]], false).detail, /from your mail app/)
   assert.match(mailSetup([], false).detail, /No local/)
   assert.match(mailSetup(f.stores, true).detail, /off/)
+})
+
+test('Sweep reads bounded new plain text and attributes ownership only to the Sent folder', t => {
+  const f = fixture(t)
+  f.sweepMessage({ text: 'Please send the sketch.\nOn Friday Sam wrote:\nQUOTED_HISTORY' })
+  f.sweepMessage({ sent: true, text: 'I sent the sketch.\n' + 'x'.repeat(4000) })
+  f.sweepMessage({ subject: 'Claim', from: { name: 'Sam', email: 'sam@example.test' },
+    to: [{ name: 'Nika', email: 'nika@example.test' }], text: 'INBOX_CLAIM' })
+  assert.equal(collect(f.db, { stores: f.stores }), 3)
+  const rows = f.db.prepare('select * from items order by rowid').all()
+  assert.equal(rows[0].from_me, 0)
+  assert.doesNotMatch(rows[0].text, /QUOTED_HISTORY/)
+  assert.equal(rows[1].from_me, 1)
+  assert.equal(rows[1].sender, 'Sam')
+  assert.equal(rows[1].text.length, 2007)
+  assert.equal(rows[2].from_me, 0)
+  const meta = JSON.parse(rows[1].meta)
+  assert.equal(meta.client, 'sweep')
+  assert.equal(meta.ownerSent, true)
+  assert.equal(meta.to[0].email, 'priya@example.test')
+  assert.equal(meta.accountEmail, 'sam@example.test')
+  assert.equal(meta.threadId, 'thread-sketch')
+  assert.equal(meta.bodyKind, 'plain')
+  assert.deepEqual(readdirSync(join(process.env.KIER_DATA_DIR, 'tmp')), [])
+})
+
+test('Sweep reads a missing body from its preview and retains privacy and bulk-mail guards', t => {
+  const f = fixture(t)
+  f.sweepMessage({ subject: 'Preview', text: null, snippet: 'PREVIEW_TEXT' })
+  f.sweepMessage({ list: 'club.example.test' })
+  f.sweepMessage({ subject: 'Your receipt' })
+  f.sweepMessage({ sent: true, subject: 'Re: Your receipt', text: 'Please correct the receipt.' })
+  const token = ['sk', 'synthetic_fixture_only_1234567890'].join('-')
+  f.sweepMessage({ subject: 'Redacted', text: token })
+  assert.equal(collect(f.db, { stores: f.stores }), 3)
+  const preview = f.db.prepare("select meta from items where thread = 'Preview'").get()
+  assert.equal(JSON.parse(preview.meta).bodyKind, 'preview')
+  assert.equal(JSON.parse(preview.meta).body, 'PREVIEW_TEXT')
+  const row = f.db.prepare("select * from items where thread = 'Redacted'").get()
+  assert.ok(!JSON.stringify(row).includes(token))
+  assert.match(row.text, /\[SECRET\]/)
+  forget(f.db, { id: row.id })
+  f.db.exec('delete from cursors')
+  assert.equal(collect(f.db, { stores: f.stores }), 0)
+})
+
+test('Sweep cursor pages at most 200 ascending ids and drains old rows and arrivals without skipping', t => {
+  const f = fixture(t)
+  for (let i = 1; i <= 405; i++) f.sweepMessage({ subject: `Sweep ${i}`, date: i <= 199 ? at - 60 * 86400 : at - 30 })
+  assert.equal(collect(f.db, { stores: f.stores, limit: 999 }), 1)
+  assert.deepEqual(f.db.prepare('select thread from items order by rowid').all().map(r => r.thread), ['Sweep 200'])
+  const state = () => JSON.parse(f.db.prepare("select value from cursors where source like 'mail:sweep:%' and source not like '%owner-addresses'").get().value)
+  assert.equal(state().high, 200)
+  assert.equal(state().stamp, null)
+  f.sweepMessage({ subject: 'Arrival while draining' })
+  assert.equal(collect(f.db, { stores: f.stores }), 200)
+  assert.equal(state().high, 400)
+  assert.equal(collect(f.db, { stores: f.stores }), 6)
+  assert.equal(state().high, 406)
+  assert.equal(collect(f.db, { stores: f.stores }), 0)
+  f.sweepMessage({ subject: 'Later arrival' })
+  assert.equal(collect(f.db, { stores: f.stores }), 1)
+  assert.equal(state().high, 407)
+})
+
+for (const first of ['spark', 'sweep']) test(`Sweep deduplicates the same Message-ID against Spark when ${first} is collected first`, t => {
+  const f = fixture(t), id = 'shared-sweep@example.test'
+  f.sparkMessage({ id, date: at - 30 })
+  f.sweepMessage({ id, date: at - 30, text: 'Please send the sketch.\nA longer downloaded body.' })
+  assert.equal(collect(f.db, { stores: f.stores.filter(s => s.client === first) }), 1)
+  assert.equal(collect(f.db, { stores: f.stores }), 0)
+  assert.equal(f.db.prepare('select count(*) n from items').get().n, 1)
+  f.db.exec('delete from cursors')
+  assert.equal(collect(f.db, { stores: f.stores }), 0)
+})
+
+test('Sweep deduplication normalizes Message-ID case and differing received/header timestamps', t => {
+  const f = fixture(t)
+  f.sparkMessage({ id: '<SHARED-HEADER@EXAMPLE.TEST>', date: at - 30 })
+  f.sweepMessage({ id: 'shared-header@example.test', date: at - 240 })
+  assert.equal(collect(f.db, { stores: f.stores }), 1)
+  assert.equal(f.db.prepare('select count(*) n from items').get().n, 1)
+  assert.equal(JSON.parse(f.db.prepare('select meta from items').get().meta).client, 'spark')
+})
+
+test('Sweep deduplicates folder copies while no-Message-ID rows keep their local identities', t => {
+  const f = fixture(t)
+  f.sweepMessage({ id: 'folder-copy@example.test' })
+  f.sweepMessage({ id: '<FOLDER-COPY@EXAMPLE.TEST>', folder: 'archive' })
+  const first = f.sweepMessage({ subject: 'Without Message-ID' })
+  const second = f.sweepMessage({ subject: 'Without Message-ID' })
+  f.sweep.prepare('update messages set message_id = null where id in (?,?)').run(first, second)
+  assert.equal(collect(f.db, { stores: f.stores }), 3)
+  assert.equal(f.db.prepare("select count(*) n from items where thread = 'Without Message-ID'").get().n, 2)
+  f.db.exec('delete from cursors')
+  assert.equal(collect(f.db, { stores: f.stores }), 0)
+})
+
+test('Sweep deduplication preserves Sent provenance and independent Message-ID collisions', t => {
+  const f = fixture(t), id = 'collision-sweep@example.test'
+  f.sweepMessage({ id, sent: true, text: 'I sent the sketch.' })
+  f.sparkMessage({ id, from: 'Sam <sam@example.test>', to: 'Priya <priya@example.test>', text: 'FORGED_INCOMING_TEXT' })
+  f.sweepMessage({ id, from: { name: 'Nika', email: 'nika@example.test' }, text: 'OTHER_CORRESPONDENT_TEXT' })
+  assert.equal(collect(f.db, { stores: f.stores }), 3)
+  const sent = f.db.prepare('select * from items where from_me = 1').get()
+  assert.equal(sent.sender, 'Sam')
+  assert.doesNotMatch(sent.text, /FORGED/)
+  assert.match(sent.text, /I sent the sketch/)
+  assert.equal(f.db.prepare('select count(*) n from items where from_me = 0').get().n, 2)
+})
+
+test('Sweep WAL collection leaves source database and WAL bytes unchanged', t => {
+  const f = fixture(t)
+  f.sweep.exec('pragma journal_mode=wal')
+  f.sweepMessage({ subject: 'WAL sketch' })
+  const before = ['', '-wal'].map(suffix => readFileSync(f.sweepPath + suffix))
+  assert.equal(collect(f.db, { stores: f.stores }), 1)
+  for (const [i, suffix] of ['', '-wal'].entries()) assert.deepEqual(readFileSync(f.sweepPath + suffix), before[i])
 })
 
 test('Apple Mail collects sender, recipients, subject, Sent role and capped plain body without changing source', t => {
@@ -183,7 +324,8 @@ test('redaction and Forget apply before content enters cards and evidence', t =>
 test('mail switch blocks collectors and every capture origin, with scoped reads hiding old rows', t => {
   const f = fixture(t)
   f.sparkMessage(); collect(f.db, { stores: f.stores })
-  const copies = ['com.apple.mail', 'com.readdle.smartemail-MacOS', 'com.readdle.SparkDesktop'].map((app, i) => ({ id: `copy-${i}`, source: 'notifications', thread: 'Mail', ts: at, text: 'Sketch', meta: { app } }))
+  const copies = ['com.apple.mail', 'com.readdle.smartemail-MacOS', 'com.readdle.SparkDesktop', 'Sweep'].map((app, i) => ({ id: `copy-${i}`, source: 'notifications', thread: 'Mail', ts: at, text: 'Sketch', meta: { app } }))
+  copies.push({ id: 'sweep-display-name', source: 'clipboard', thread: 'Sweep', ts: at, text: 'Sketch', meta: { app: 'test.unknown' } })
   addItems(f.db, copies)
   setSource('mail', false); t.after(() => setSource('mail', true))
   assert.equal(collect(f.db, { stores: [{ path: '/does-not-exist', client: 'spark' }] }), 0)
@@ -193,10 +335,11 @@ test('mail switch blocks collectors and every capture origin, with scoped reads 
   assert.equal(readScope(f.db, authorization(['whatsapp'], [])).prepare('select count(*) n from items').get().n, 0)
 })
 
-test('sent mail suggests completion of a cross-source owner reminder', async t => {
+for (const client of ['apple-mail', 'sweep']) test(`${client} Sent mail suggests completion of a cross-source owner reminder`, async t => {
   const f = fixture(t)
   const reminder = createReminder(f.db, { title: 'Send Nika the contract', due: today(), when: '' }, at - 3600)
-  f.appleMessage({ sent: true, subject: 'Contract', text: 'Nika, I sent the contract you requested.' })
+  f[client === 'sweep' ? 'sweepMessage' : 'appleMessage']({ sent: true, subject: 'Contract', text: 'Nika, I sent the contract you requested.',
+    to: [{ name: 'Nika', email: 'nika@example.test' }] })
   collect(f.db, { stores: f.stores })
   const card = tasks(f.db).find(r => r.id === reminder.id)
   const lines = evidence(f.db, card)

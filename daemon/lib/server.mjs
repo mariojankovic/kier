@@ -23,6 +23,7 @@ import { redact } from './redact.mjs'
 import { act, steps } from './setup.mjs'
 import { diagnostics } from './diagnostics.mjs'
 import { ask, agents, CLAUDE } from './ask.mjs'
+import { mailAssist, MAIL_ASSIST_MAX_BYTES } from './mail-assist.mjs'
 import { eventInfo } from './headsup.mjs'
 import { say, speak, speaking, stop } from './speak.mjs'
 import { handoff, reopen, start as startSession, warm as warmHandoffs } from './handoff.mjs'
@@ -141,8 +142,13 @@ export function serve(db, { install, port = config.port } = {}) {
       if (!hosts.has(req.headers.host)) return json(res, { error: 'forbidden' }, 403)
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, { error: 'forbidden origin' }, 403)
       // Native bodies are encrypted too: a port squatter must not receive captured text.
-      const requestBody = nonce && wire.length ? openBody(secret, wire).toString('utf8') : wire.toString('utf8')
       const url = new URL(req.url, `http://${req.headers.host}`)
+      let requestBody
+      try { requestBody = nonce && wire.length ? openBody(secret, wire).toString('utf8') : wire.toString('utf8') }
+      catch (error) {
+        if (url.pathname === '/api/mail-assist') return json(res, { error: 'Invalid encrypted request body.' }, 400)
+        throw error
+      }
       const q = Object.fromEntries(url.searchParams)
       if (pages[url.pathname]) {
         res.writeHead(200, { 'content-type': url.pathname.endsWith('.mjs') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8' })
@@ -160,6 +166,19 @@ export function serve(db, { install, port = config.port } = {}) {
         return json(res, { token: browserToken })
       }
       if (url.pathname.startsWith('/api/') && !nonce && !authedBrowser(req)) return json(res, { error: 'authentication required' }, 401)
+      if (url.pathname === '/api/mail-assist') {
+        if (!nonce) return json(res, { error: 'authentication required' }, 401)
+        if (req.method !== 'POST') return json(res, { error: 'Mail assist requires POST.' }, 400)
+        if (Buffer.byteLength(requestBody, 'utf8') > MAIL_ASSIST_MAX_BYTES) return json(res, { error: 'Mail assist request is too large.' }, 413)
+        let input
+        try { input = JSON.parse(requestBody) }
+        catch { return json(res, { error: 'Invalid mail assist JSON.' }, 400) }
+        try { return json(res, await mailAssist(db, input)) }
+        catch (error) {
+          const status = [400, 413, 503].includes(error.status) ? error.status : 503
+          return json(res, { error: error.status === status ? error.message : 'Kier\'s model is not ready. Try again shortly.' }, status)
+        }
+      }
       if (url.pathname === '/api/browser-ticket' && req.method === 'POST' && nonce) return json(res, { ticket: issueTicket(`http://${req.headers.host}`) })
       if (url.pathname === '/api/model-settings' && req.method === 'GET') return json(res, modelSettings())
       if (url.pathname === '/api/mcp-sources' && req.method === 'GET') return json(res, { sources: sourceSummary() })

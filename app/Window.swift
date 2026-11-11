@@ -34,6 +34,8 @@ final class Viewer: NSObject, NSWindowDelegate {
       // The SwiftUI toolbar, title and search field belong in the window's own title bar.
       host.sceneBridgingOptions = [.toolbars, .title]
       let w = NSWindow(contentViewController: host)
+      // Never "Untitled" while SwiftUI's own title is on its way.
+      w.title = "Kier"
       w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
       // Black glass all the way to the edges, title bar included (see Glass.swift).
       w.titlebarAppearsTransparent = true

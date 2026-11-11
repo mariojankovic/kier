@@ -18,6 +18,14 @@ privacy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(privacy)
 
 
+# hashlib.file_digest needs Python 3.11; macOS's own python3 is 3.9.
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''): digest.update(chunk)
+    return digest.hexdigest()
+
+
 def inventory(root):
     if root.is_symlink() or not root.is_dir():
         raise ValueError('inventory root must be a real directory')
@@ -30,7 +38,7 @@ def inventory(root):
         elif path.is_dir():
             rows[rel] = {'type': 'directory', 'mode': path.stat().st_mode & 0o777}
         elif path.is_file():
-            rows[rel] = {'sha256': hashlib.file_digest(path.open('rb'), 'sha256').hexdigest(),
+            rows[rel] = {'sha256': sha256(path),
                          'mode': path.stat().st_mode & 0o777}
     return rows
 

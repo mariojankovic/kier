@@ -51,7 +51,7 @@ export function startRuntime(logTo) {
 
 function part(name, args) {
   if (children[name]) return
-  const child = spawn(MLX.python, ['-I', '-E', SCRIPT, ...args], {
+  const child = spawn(MLX.python, ['-I', '-E', '-B', SCRIPT, ...args], {
     env: { KIER_SIDECAR_TOKEN: sidecarToken(), HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', TOKENIZERS_PARALLELISM: 'false', KIER_MODEL_NAME: config.model, KIER_EMBED_MODEL: EMBED.dir },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -113,7 +113,7 @@ async function fetchEmbedder() {
   installing.phase = 'embed'
   await runtimeCommand(MLX.python, ['-I', '-E', '-c', `from huggingface_hub import snapshot_download; snapshot_download(${JSON.stringify(EMBED.repo)}, revision=${JSON.stringify(EMBED.revision)}, local_dir=${JSON.stringify(EMBED_DOWNLOAD)})`],
     { env: { HF_HUB_DISABLE_TELEMETRY: '1', HF_HUB_DISABLE_PROGRESS_BARS: '1' } })
-  await runtimeCommand(MLX.python, ['-I', '-E', '-c', `import sys; sys.path.insert(0, ${JSON.stringify(SIDECAR)}); import embedder; embedder.prepare(${JSON.stringify(EMBED_DOWNLOAD)}, ${JSON.stringify(EMBED.dir)})`])
+  await runtimeCommand(MLX.python, ['-I', '-E', '-B', '-c', `import sys; sys.path.insert(0, ${JSON.stringify(SIDECAR)}); import embedder; embedder.prepare(${JSON.stringify(EMBED_DOWNLOAD)}, ${JSON.stringify(EMBED.dir)})`])
   writeFileSync(resolve(EMBED.dir, '.kier-ready'), EMBED.revision)
   rmSync(EMBED_DOWNLOAD, { recursive: true, force: true })
 }

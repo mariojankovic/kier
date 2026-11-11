@@ -5,6 +5,7 @@ import SwiftUI
 private let dayFormat: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "EEE d MMM"; return f }()
 private let longFormat: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "EEEE d MMMM"; return f }()
 private let clock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
+private let weekdayFormat: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "EEE"; return f }()
 
 func dayLabel(_ date: Date) -> String {
   let cal = Calendar.current
@@ -39,7 +40,13 @@ extension Card {
 
   // Where Reply goes: the chat's own link when there is one, else the app the conversation lives in, if installed.
   var chatURL: URL? { safeLink(url) }
-  var app: URL? { open_app.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) } }
+  var app: URL? {
+    guard let id = open_app else { return nil }
+    if id.contains(".") { return NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) }
+    // An app named rather than given by bundle id (Sweep): its copy in Applications.
+    return [URL(fileURLWithPath: "/Applications"), FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")]
+      .map { $0.appendingPathComponent("\(id).app") }.first { FileManager.default.fileExists(atPath: $0.path) }
+  }
   var canReply: Bool { chatURL != nil || app != nil }
   // "Open chat", or the app's name when only the app can be opened ("Open Spark").
   var openLabel: String {
@@ -49,10 +56,32 @@ extension Card {
     return "Open chat"
   }
 
+  // When a dated card is due, as a person says it: "today 15:00", "tomorrow", "Fri 14 Nov", "overdue since Mon".
+  // Only while it's still to do; nil without a date.
+  var dueLabel: String? {
+    guard let due, !due.isEmpty, let day = isoDay.date(from: due), [nil, "open", "overdue", "snoozed"].contains(state) else { return nil }
+    let cal = Calendar.current
+    let today = cal.startOfDay(for: Date())
+    let at = due_time.flatMap { t -> Date? in
+      let p = t.split(separator: ":").compactMap { Int($0) }
+      return p.count == 2 ? cal.date(bySettingHour: p[0], minute: p[1], second: 0, of: day) : nil
+    }
+    let time = at != nil ? " \(due_time ?? "")" : ""
+    if day < today {
+      let days = cal.dateComponents([.day], from: day, to: today).day ?? 0
+      return "overdue since \(days == 1 ? "yesterday" : days < 7 ? weekdayFormat.string(from: day) : dayFormat.string(from: day))"
+    }
+    if cal.isDateInToday(day) { return (at.map { $0 < Date() } ?? false) ? "overdue since \(due_time ?? "")" : "today\(time)" }
+    if cal.isDateInTomorrow(day) { return "tomorrow\(time)" }
+    return dayFormat.string(from: day) + time
+  }
+
   var kicker: String {
-    // One of your own reminders ("Your reminders" in Setup): its list, not a chat.
-    if source == "reminders" { return needsConfirmation ? suggestionLabel : "Your reminder in \(thread ?? "Reminders")" }
-    let when = "\(dateLabel(ts)) \(timeLabel(ts))"
+    // One of your own reminders ("Your reminders" in Setup): its list, not a chat, and when it's due.
+    if source == "reminders" { return needsConfirmation ? suggestionLabel : "Your reminder in \(thread ?? "Reminders")\(dueLabel.map { ", \($0)" } ?? "")" }
+    // A dated card says when it's due; otherwise when it was said.
+    let due = dueLabel
+    let when = due.map { $0.hasPrefix("overdue") ? $0 : "due \($0)" } ?? "\(dateLabel(ts)) \(timeLabel(ts))"
     let who = self.who
     // A reply on Threads or X is filed under its conversation's id ("Threads:4020…"): the site is the place.
     let place = source == "social" ? " on \(thread?.split(separator: ":").first.map(String.init) ?? "the web")"
@@ -70,7 +99,7 @@ extension Card {
     case "promise": return "You promised\(place), \(when)"
     case "reply": return "\(who) is waiting for your reply\(place), \(when)"
     case "payment": return "\(who) is waiting for payment, \(when)"
-    case "appointment": return "Appointment, from \(who)\(place), \(when)"
+    case "appointment": return "Appointment, from \(who)\(place), \(due ?? when)"
     case "stalled": return "\(who) left this in “\(thread ?? "a session")”, \(when)"
     default:
       if source == "notifications" { return "\(thread ?? "An app"): \(who), \(when)" }
@@ -100,6 +129,12 @@ struct Kind {
 
 // MARK: Window
 
+private struct WindowTitle: NSViewRepresentable {
+  let title: String
+  func makeNSView(context: Self.Context) -> NSView { NSView() }
+  func updateNSView(_ view: NSView, context: Self.Context) { DispatchQueue.main.async { view.window?.title = title } }
+}
+
 struct ContentView: View {
   @Environment(Store.self) var store
   @State private var visited: Set<Page> = []
@@ -126,6 +161,7 @@ struct ContentView: View {
       }
       .animation(.easeOut(duration: 0.22), value: store.page)
       .onChange(of: store.page, initial: true) { visited.insert(store.page) }
+      .navigationTitle(title)
       // A card's side panel, for the brief. Here rather than on the brief itself, so its split view is built once and
       // not again every time you come back to the brief.
       .inspector(isPresented: Binding(get: { store.selected != nil && (store.page == .brief || store.page == .done) }, set: { if !$0 { store.select(nil) } })) {
@@ -134,12 +170,14 @@ struct ContentView: View {
     }
     .task(id: store.page) { await store.refresh() }
     .task { await store.loadConversations() }
+    // Kier's window is an NSWindow around a hosting controller, and SwiftUI never passes navigationTitle on to it, so the
+    // title bar said "Untitled". Set the window's own title instead.
+    .background(WindowTitle(title: title))
     .background(Kier.page.ignoresSafeArea())
     .toolbarBackground(.hidden, for: .windowToolbar)
     .environment(\.colorScheme, .dark)
-    // The title, the search and the Timeline's own controls live here, not in the pages: every page stays built, and a
-    // hidden page's toolbar would otherwise show on all of them. Search covers everything, so typing opens the Timeline.
-    .navigationTitle(title)
+    // The search and the Timeline's own controls live here, not in the pages: every page stays built, and a hidden
+    // page's toolbar would otherwise show on all of them. Search covers everything, so typing opens the Timeline.
     .searchable(text: $store.query, placement: .toolbar, prompt: "Search everything")
     .onChange(of: store.query) {
       store.search(store.query)
@@ -438,7 +476,7 @@ struct EventRow: View {
       IconTile(symbol: "calendar")
       VStack(alignment: .leading, spacing: 2) {
         Text(event.text).font(.kierCardTitle)
-        Text((withDay ? dayLabel(event.day) + ", " : "") + (event.allDay == true ? "all day" : timeLabel(event.ts)))
+        Text((withDay ? dayLabel(event.day) + ", " : "") + (event.allDay == true ? "all day" : timeLabel(event.ts) + (event.end.map { "-" + timeLabel($0) } ?? "")))
           .font(.kierSmall).foregroundStyle(Kier.faint)
       }
       Spacer(minLength: 0)

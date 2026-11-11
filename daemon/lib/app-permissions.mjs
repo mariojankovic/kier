@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { config, configPath } from './config.mjs'
 const identities = {
-  mail: ['com.apple.mail', 'com.readdle.smartemail-macos', 'com.readdle.smartemail-macos-setapp', 'com.readdle.sparkdesktop', 'mail', 'apple mail', 'spark', 'spark mail', 'spark desktop'],
+  mail: ['com.apple.mail', 'com.readdle.smartemail-macos', 'com.readdle.smartemail-macos-setapp', 'com.readdle.sparkdesktop', 'mail', 'apple mail', 'spark', 'spark mail', 'spark desktop', 'sweep'],
   whatsapp: ['net.whatsapp.whatsapp', 'whatsapp'],
   imessage: ['com.apple.mobilesms', 'messages', 'imessage'],
   discord: ['com.hnc.discord', 'com.hnc.discordptb', 'com.hnc.discordcanary', 'discord', 'discord ptb', 'discord canary'],

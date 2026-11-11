@@ -34,3 +34,14 @@ test('app and inference workers use controlled environment and isolated Python f
     assert.match(source, /\[\s*["']-I["'],\s*["']-E["']/)
   }
 })
+test('Python run from inside Kier.app never writes bytecode into the signed bundle', () => {
+  // A __pycache__ beside the sidecars breaks the app's signature, and macOS then refuses to start the bundled Node.
+  for (const file of ['runtime', 'second']) {
+    const source = readFileSync(new URL(`../lib/${file}.mjs`, import.meta.url), 'utf8')
+    assert.match(source, /\[\s*["']-I["'],\s*["']-E["'],\s*["']-B["'],\s*SCRIPT/)
+  }
+  assert.match(readFileSync(new URL('../lib/runtime.mjs', import.meta.url), 'utf8'), /\[\s*["']-I["'],\s*["']-E["'],\s*["']-B["'],\s*["']-c["'],[^\n]*sys\.path\.insert\(0, \$\{JSON\.stringify\(SIDECAR\)\}/)
+  assert.match(readFileSync(new URL('../../app/main.swift', import.meta.url), 'utf8'), /removeItem\(atPath: root \+ "\/sidecar\/__pycache__"\)/)
+  const flags = execFileSync('python3', ['-I', '-E', '-B', '-c', 'import sys; print(sys.dont_write_bytecode)'], { encoding: 'utf8' }).trim()
+  assert.equal(flags, 'True')
+})

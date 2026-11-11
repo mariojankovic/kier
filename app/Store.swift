@@ -23,6 +23,8 @@ struct Card: Codable, Identifiable, Hashable {
   let text: String?
   let url: String?
   let due: String?
+  // The time it's due, HH:MM, when it has one (a reminder's time, or "at 15:00" said with the date).
+  let due_time: String?
   let amount: String?
   let summary: String?
   let card: String?
@@ -50,6 +52,8 @@ struct Event: Codable, Identifiable, Hashable {
   let text: String
   let ts: Int
   let allDay: Bool?
+  // When a timed event ends, if the calendar says.
+  let end: Int?
   let day: String
   var key: String { id ?? "\(ts)\(text)" }
 }

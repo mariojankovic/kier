@@ -21,11 +21,11 @@ export function collect(db) {
     let rows
     try {
       // OccurrenceCache expands repeating events into their single dates.
-      rows = cal.db.prepare(`select o.event_id id, coalesce(o.occurrence_start_date, o.occurrence_date) start, ${cols}
+      rows = cal.db.prepare(`select o.event_id id, coalesce(o.occurrence_start_date, o.occurrence_date) start, o.occurrence_end_date finish, ${cols}
         from OccurrenceCache o join CalendarItem i on i.ROWID = o.event_id ${joins}
         where coalesce(o.occurrence_start_date, o.occurrence_date) between ? and ?`).all(from, to)
     } catch {
-      rows = cal.db.prepare(`select i.ROWID id, i.start_date start, ${cols} from CalendarItem i ${joins}
+      rows = cal.db.prepare(`select i.ROWID id, i.start_date start, i.end_date finish, ${cols} from CalendarItem i ${joins}
         where i.start_date between ? and ?`).all(from, to)
     }
     // Future events can still move or be cancelled, so they are replaced on every run; past ones stay.
@@ -37,9 +37,11 @@ export function collect(db) {
     const items = rows.filter((r) => r.summary && !r.hidden && r.status !== 3 && r.cal !== 'Kier' && !r.completed
       && !(r.cal === 'Scheduled Reminders' && (myReminders() || cards.has(r.summary)))).map((r) => {
       const ts = Math.floor(r.start + APPLE_EPOCH)
+      // When a timed event ends, so it can read "14:00-15:00".
+      const end = !r.all_day && r.finish > r.start ? Math.floor(r.finish + APPLE_EPOCH) : null
       return {
         id: `${source}:${r.id}:${ts}`, source, thread: r.cal || 'Calendar', sender: r.cal || 'Calendar', fromMe: true, ts,
-        text: `${r.summary}${r.loc ? ` @ ${r.loc}` : ''}`, meta: { allDay: !!r.all_day },
+        text: `${r.summary}${r.loc ? ` @ ${r.loc}` : ''}`, meta: { allDay: !!r.all_day, ...(end && { end }) },
       }
     })
     return addItems(db, items)

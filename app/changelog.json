@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.7.10",
+    "date": "2026-11-11",
+    "title": "Kier opens again",
+    "notes": [
+      "Kier could stop opening after a while, because files it wrote inside its own app broke macOS's check of the app. It no longer writes them, and cleans up any left behind.",
+      "If Kier can't start, opening it now says so, with Try Again and Show Log, instead of doing nothing.",
+      "A Kier that can't start no longer fills its log with the same line every few seconds.",
+      "The window shows the page you're on instead of \"Untitled\".",
+      "Reminders and other dated cards say when they're due: \"today 15:00\", \"tomorrow\", \"Fri 14 Nov\" or \"overdue since Mon\". Calendar events show when they end.",
+      "Kier works with more mail apps."
+    ],
+    "summary": "Kier opens again, shows when things are due, and works with more mail apps."
+  },
+  {
     "version": "0.7.9",
     "date": "2026-11-06",
     "title": "Open in Claude works again",

@@ -4,8 +4,9 @@ import { createHash } from 'node:crypto'
 import { closeSync, existsSync, openSync, opendirSync, readdirSync, readSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 import { config, home } from '../lib/config.mjs'
-import { addItems, cursor, now, setCursor } from '../lib/db.mjs'
+import { addItems, cursor, now, redactValue, setCursor } from '../lib/db.mjs'
 import { isOff } from '../lib/settings.mjs'
 import { APPLE_EPOCH, snapshot } from './util.mjs'
 
@@ -26,20 +27,29 @@ export function mailStores(base = home) {
   // Old version folders are migration leftovers, not additional accounts.
   const apple = versions.map(v => resolve(root, v, 'MailData/Envelope Index')).find(existsSync)
   const spark = resolve(base, 'Library/Application Support/Spark Mail/core-data/messages.sqlite')
+  const sweep = resolve(base, 'Library/Application Support/Sweep/sweep.db')
   return [...(apple ? [{ client: 'apple-mail', path: apple, root: dirname(dirname(apple)) }] : []),
-    ...(existsSync(spark) ? [{ client: 'spark', path: spark }] : [])]
+    ...(existsSync(spark) ? [{ client: 'spark', path: spark }] : []),
+    ...(existsSync(sweep) ? [{ client: 'sweep', path: sweep }] : [])]
 }
 
+// Sweep isn't out yet, so Setup doesn't name it: its mail is read, and the line names only the apps people can get.
 export function mailSetup(stores = mailStores(), disabled = isOff(source)) {
-  const clients = stores.map(s => s.client === 'apple-mail' ? 'Apple Mail' : 'Spark')
+  const clients = stores.map(s => s.client)
+  const names = clients.map(c => ({ 'apple-mail': 'Apple Mail', spark: 'Spark' })[c]).filter(Boolean)
+  const from = names.length ? `from ${names.join(' and ')}` : 'from your mail app'
   return { found: clients.length > 0, enabled: clients.length > 0 && !disabled, detail: disabled ? 'Mail is off in What Kier reads.' : clients.length
-    ? `Reads personal mail locally from ${clients.join(' and ')}. Bulk mail and attachments stay out.`
+    ? `Reads personal mail locally ${from}. Bulk mail and attachments stay out.`
     : 'No local Apple Mail or Spark store found. Open either app and let it download your mail.' }
 }
 
 // One bounded page of new arrivals, plus one page of the initial backfill. The
 // high-water mark moves only after its entire interval has been drained.
 function page(db, state, limit, client, cutoff) {
+  if (client === 'sweep') {
+    const rows = db.prepare('select id pk from messages where id > ? order by id limit ?').all(state?.high || 0, limit)
+    return { ids: rows.map(r => r.pk), state: { high: rows.at(-1)?.pk ?? state?.high ?? 0, before: null, pending: null } }
+  }
   const c = columns(db, 'messages')
   const date = client === 'apple-mail' ? field(c, 'messages', ['date_received', 'date_sent'])
     : `coalesce(nullif(${field(c, 'messages', ['receivedDate'])}, 0), ${field(c, 'messages', ['creationDate'])})`
@@ -240,6 +250,44 @@ function sparkRows(db, ids) {
     .map(r => ({ ...r, from: addresses(r.messageFrom), to: addresses(r.messageTo), cc: addresses(r.messageCc) }))
 }
 
+function sweepRows(db, ids) {
+  if (!ids.length) return []
+  return db.prepare(`select m.id pk, m.account_id accountId, a.email accountEmail, m.folder mailbox,
+    m.message_id messageId, m.thread_id threadId, m.from_name senderName, m.from_email senderAddress,
+    m.to_json messageTo, m.cc_json messageCc, m.subject, m.date, m.list_id list,
+    substr(m.snippet, 1, 2000) preview, substr(m.body_text, 1, 65536) body
+    from messages m join accounts a on a.id = m.account_id
+    where m.id in (${ids.map(() => '?').join(',')}) order by m.id`).all(...ids)
+    .map(r => ({ ...r, sent: r.mailbox === 'sent',
+      from: addresses({ name: r.senderName, email: r.senderAddress }), to: addresses(r.messageTo), cc: addresses(r.messageCc),
+      snippet: newlyWritten(r.body ?? r.preview ?? '').slice(0, 2000), bodyKind: r.body == null ? 'preview' : 'plain' }))
+}
+
+function duplicateSweepCopy(db, item, pending) {
+  if (!item.meta.messageId) return false
+  const normalized = value => String(value || '').trim().toLowerCase()
+  const participants = people => [...new Set((Array.isArray(people) ? people : []).map(p => normalized(p.email)).filter(Boolean))].sort()
+  const metadata = i => { try { return typeof i.meta === 'string' ? JSON.parse(i.meta) : i.meta } catch { return null } }
+  const identity = i => {
+    const m = metadata(i)
+    if (!m) return null
+    return JSON.stringify([normalized(m.messageId), Boolean(i.fromMe ?? i.from_me),
+      normalized(m.subject), participants(m.from), participants(m.to), participants(m.cc)])
+  }
+  const stored = redactValue(item), fingerprint = identity(stored)
+  const matches = other => {
+    const meta = metadata(other)
+    return meta && (item.meta.client === 'sweep' || meta.client === 'sweep')
+      && Math.abs(item.ts - other.ts) <= 86400 && fingerprint === identity(other)
+  }
+  if (pending.some(other => normalized(other.meta.messageId) === normalized(item.meta.messageId) && matches(redactValue(other)))) return true
+  const rows = db.prepare(`select from_me, ts, meta from items where ts between ? and ? and source = 'mail' and from_me = ?
+    and json_valid(meta) and lower(trim(json_extract(meta, '$.messageId'), '<> ')) = ?
+    and (? = 'sweep' or json_extract(meta, '$.client') = 'sweep') limit ?`)
+    .all(item.ts - 86400, item.ts + 86400, Number(item.fromMe), normalized(item.meta.messageId), item.meta.client, PAGE_SIZE)
+  return rows.some(matches)
+}
+
 export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now() } = {}) {
   if (isOff(source)) return 0
   limit = Math.max(1, Math.min(PAGE_SIZE, Math.trunc(limit) || PAGE_SIZE))
@@ -254,10 +302,14 @@ export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now
         try { const st = statSync(store.path + suffix); return `${st.ino}:${st.size}:${st.mtimeMs}` } catch { return '' }
       }).join('|')
       if (saved?.before === null && !saved.pending && saved.stamp === stamp) continue
-      copy = snapshot(store.path, `${key.replaceAll(':', '-')}-${process.pid}`)
+      if (store.client === 'sweep') {
+        const database = new DatabaseSync(store.path, { readOnly: true })
+        copy = { db: database, close: () => database.close() }
+      } else copy = snapshot(store.path, `${key.replaceAll(':', '-')}-${process.pid}`)
       copy.db.exec('pragma query_only = on')
       const { ids, state } = page(copy.db, saved, limit, store.client, at - config.backfillDays * 86400)
-      const rows = store.client === 'apple-mail' ? appleRows(copy.db, ids, store.root) : sparkRows(copy.db, ids)
+      const rows = store.client === 'apple-mail' ? appleRows(copy.db, ids, store.root)
+        : store.client === 'sweep' ? sweepRows(copy.db, ids) : sparkRows(copy.db, ids)
       // Only Sent is authoritative for learning an account address. An incoming
       // message's display name, To header or body can never claim owner authority.
       const ownerKey = `${key}:owner-addresses`
@@ -266,7 +318,7 @@ export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now
       for (const row of rows) if (row.sent === true || Number(row.sent) === 1) for (const a of row.from) if (a.email) owners.add(a.email)
       const items = []
       for (const row of rows) {
-        const ts = mailDate(row.date)
+        const ts = store.client === 'sweep' ? Math.floor(Number(row.date)) : mailDate(row.date)
         if (ts < at - config.backfillDays * 86400 || ts > at + 86400) continue
         const fromMe = row.sent === true || Number(row.sent) === 1
         const from = row.from[0]
@@ -278,16 +330,17 @@ export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now
         const mid = messageID(row.messageId)
         // Message-ID is only a correlation hint. The store also keys each local copy.
         const id = `mail:${hash(mid ? `message:${mid}` : `${key}:${row.pk}`)}`
-        items.push({ id, source, thread, sender: fromMe ? config.me : display(from), fromMe, ts,
+        const item = { id, source, thread, sender: fromMe ? config.me : display(from), fromMe, ts,
           text: [String(row.subject || '').slice(0, 500), String(row.snippet || '').slice(0, 2000)].filter(Boolean).join('\n'),
-          meta: { subject: String(row.subject || '').slice(0, 500), body: String(row.snippet || '').slice(0, 2000), bodyKind: store.client === 'apple-mail' ? 'plain' : 'preview', client: store.client, copyKey: `${key}:${row.pk}`, account: key, ownerSent: fromMe, messageId: mid, to: row.to, cc: row.cc, mailbox: row.mailbox || '',
-            from: row.from, group: row.to.length + row.cc.length > 1, ...(row.conversationPk != null && { conversationPk: row.conversationPk }) } })
+          meta: { subject: String(row.subject || '').slice(0, 500), body: String(row.snippet || '').slice(0, 2000), bodyKind: row.bodyKind || (store.client === 'apple-mail' ? 'plain' : 'preview'), client: store.client, copyKey: `${key}:${row.pk}`, account: row.accountId == null ? key : `${key}:${row.accountId}`, ownerSent: fromMe, messageId: mid, to: row.to, cc: row.cc, mailbox: row.mailbox || '',
+            from: row.from, group: row.to.length + row.cc.length > 1, ...(row.accountEmail && { accountEmail: row.accountEmail }), ...(row.threadId && { threadId: row.threadId }), ...(row.conversationPk != null && { conversationPk: row.conversationPk }) } }
+        if (!duplicateSweepCopy(db, item, items)) items.push(item)
       }
       added += addItems(db, items)
       setCursor(db, ownerKey, JSON.stringify([...owners]))
       // Arrivals beyond a draining interval still need a pass even if the files
       // stop changing before that interval finishes.
-      const caughtUp = state.high === copy.db.prepare('select coalesce(max(rowid), 0) n from messages').get().n
+      const caughtUp = state.high === copy.db.prepare(`select coalesce(max(${store.client === 'sweep' ? 'id' : 'rowid'}), 0) n from messages`).get().n
       setCursor(db, key, JSON.stringify({ ...state, stamp: caughtUp ? stamp : null }))
     } catch { failures++ } finally { copy?.close() }
   }

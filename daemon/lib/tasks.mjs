@@ -61,9 +61,16 @@ export function owed(db, live, at = now(), minutes = OWED_MINUTES) {
 const sourceFilter = (sources) => `${sources ? `and i.source in (${sources.map((s) => `'${s.replace(/'/g, '')}'`).join(', ')})` : ''} ${offClause()}`
 // Where Reply takes you when a card has no link of its own: the app the conversation lives in.
 const APPS = { whatsapp: 'net.whatsapp.WhatsApp', imessage: 'com.apple.MobileSMS', discord: 'com.hnc.Discord', reminders: 'com.apple.reminders' }
+// Mail read from Sweep opens in Sweep, which has no per-message link Kier can use. Sweep is named rather than given by
+// bundle id; Kier.app finds it in Applications (Card.app).
+const MAIL_APPS = { sweep: 'Sweep' }
 const openApp = (r) => {
   if (r.url) return null
-  try { return r.source === 'notifications' ? JSON.parse(r.meta || '{}').app || null : APPS[r.source] || null } catch { return null }
+  try {
+    if (r.source === 'notifications') return JSON.parse(r.meta || '{}').app || null
+    if (r.source === 'mail') return MAIL_APPS[JSON.parse(r.meta || '{}').client] || null
+    return APPS[r.source] || null
+  } catch { return null }
 }
 
 // Used by the native Confirm action and other explicit owner marks.
@@ -151,7 +158,7 @@ export function tasks(db, { days = 14, sources, auth = authorization(sources ?? 
     const maybe = r.source !== 'reminders' && !r.from_me && r.confirmed !== 1 && ((r.second != null && r.second < SECOND.threshold) || r.quiet === 1)
     delete r.reply
     delete r.raw_text
-    return { ...r, from_me: !!r.from_me, state, reason, maybe, open_app: openApp(r) }
+    return { ...r, from_me: !!r.from_me, state, reason, maybe, open_app: openApp(r), due_time: dueTime(r) }
   })
 }
 
@@ -163,7 +170,7 @@ export function events(db, fromIso, toIso, { sources, auth = authorization(sourc
   const [, to] = dayRange(toIso)
   const calendar = (sources && !sources.includes('calendar')) || isOff('calendar') ? []
     : db.prepare("select id, thread, ts, text, meta from items where source = 'calendar' and ts >= ? and ts < ? order by ts").all(from, to)
-      .map((e) => ({ ...e, allDay: JSON.parse(e.meta || '{}').allDay, day: isoDay(e.ts) }))
+      .map((e) => { const m = JSON.parse(e.meta || '{}'); return { ...e, allDay: m.allDay, ...(m.end && { end: m.end }), day: isoDay(e.ts) } })
   const chats = planEvents(db, fromIso, toIso, { sources })
     .filter((p) => !calendar.some((e) => e.day === p.day && !e.allDay && !p.allDay && Math.abs(e.ts - p.ts) <= 15 * 60))
   return [...calendar, ...chats].sort((a, b) => a.ts - b.ts)
@@ -288,7 +295,7 @@ function ahead(db, b) {
   const asked = db.prepare('select important, label, context from heads_up where key = ?')
   const when = (x) => `${x.day} ${x.ts ? timeLabel(x.ts) : '99:99'}`
   return [
-    ...b.soon.events.map((e) => ({ id: e.id, day: e.day, ts: e.allDay ? null : e.ts, text: e.text, h: asked.get(`${e.id}@${e.day}`) })),
+    ...b.soon.events.map((e) => ({ id: e.id, day: e.day, ts: e.allDay ? null : e.ts, end: e.end || null, allDay: !!e.allDay, text: e.text, h: asked.get(`${e.id}@${e.day}`) })),
     ...b.soon.tasks.map((t) => ({ id: t.id, card: t.id, day: t.due, ts: null, text: t.summary, from: from(t), h: asked.get(`${t.id}@${t.due}`) })),
   ].filter((x) => x.h?.important === 1).map((x) => ({ ...x, label: x.h.label || x.text, context: x.h.context || null }))
     .sort((x, y) => when(x).localeCompare(when(y)))
@@ -302,24 +309,34 @@ const from = (t) => `${t.from_me ? 'You said' : who(t.sender)}, ${SOURCE[t.sourc
 // always get a line. It's worked out from what's open, so it holds still through the day: things drop off as they're
 // done, and only something new and important adds a line.
 const DAY_LINES = 4
+// The time a dated card is due, HH:MM, or null: a reminder's own time in Reminders, else one said with the date.
+function dueTime(r) {
+  if (!r.due) return null
+  if (r.source === 'reminders') { try { const t = JSON.parse(r.meta || '{}').time; if (/^\d{2}:\d{2}$/.test(t || '')) return t } catch {} }
+  return clockOf(r)
+}
+
 // Read time words as HH:MM, distinguishing dotted dates from clock times.
 export function clockOf(t) {
   const m = String(t.when_words || '').match(/\b([01]?\d|2[0-3])(?::([0-5]\d)(?!\d)|\.([0-5]\d)(?!\d)(?!\.\d|\.(?:\s|$)))/)
   return m ? `${m[1].padStart(2, '0')}:${m[2] ?? m[3]}` : null
 }
 
+// An event's time as it reads on a line: "14:00", or "14:00-15:00" when its end is known.
+const span = (e) => `${timeLabel(e.ts)}${e.end ? `-${timeLabel(e.end)}` : ''}`
+
 function dayList(b) {
   const at = now()
   const clock = clockOf
   const lines = [
-    ...b.today.events.filter((e) => !e.allDay && e.ts > at).slice(0, 2).map((e) => ({ id: e.id, card: null, when: timeLabel(e.ts), text: e.text })),
+    ...b.today.events.filter((e) => !e.allDay && e.ts > at).slice(0, 2).map((e) => ({ id: e.id, card: null, when: span(e), text: e.text })),
     ...b.forgotten.map((t) => ({ id: t.id, card: t.id, when: 'Overdue', text: t.summary, detail: from(t) })),
     ...b.today.tasks.map((t) => ({ id: t.id, card: t.id, when: clock(t) || 'Today', text: t.summary, detail: from(t) })),
   ]
   const day = plusDays(b.date, 1)
-  const tomorrow = b.ahead.filter((x) => x.day === day).slice(0, 2).map((x) => ({ id: x.id, card: x.card || null, when: x.ts ? `Tomorrow ${timeLabel(x.ts)}` : 'Tomorrow', text: x.label, detail: x.context || x.from || null }))
+  const tomorrow = b.ahead.filter((x) => x.day === day).slice(0, 2).map((x) => ({ id: x.id, card: x.card || null, when: x.ts ? `Tomorrow ${span(x)}` : x.allDay ? 'Tomorrow, all day' : 'Tomorrow', text: x.label, detail: x.context || x.from || null }))
   // Show the next upcoming item when space permits, including on quiet days.
-  const later = b.ahead.filter((x) => x.day > day).slice(0, 1).map((x) => ({ id: x.id, card: x.card || null, when: `${weekday(x.day)}${x.ts ? ` ${timeLabel(x.ts)}` : ''}`, text: x.label, detail: x.context || x.from || null }))
+  const later = b.ahead.filter((x) => x.day > day).slice(0, 1).map((x) => ({ id: x.id, card: x.card || null, when: `${weekday(x.day)}${x.ts ? ` ${span(x)}` : x.allDay ? ', all day' : ''}`, text: x.label, detail: x.context || x.from || null }))
   const out = [...lines.slice(0, DAY_LINES - Math.min(1, tomorrow.length)), ...tomorrow].slice(0, DAY_LINES)
   return out.length < DAY_LINES ? [...out, ...later] : out
 }
