@@ -1,7 +1,7 @@
 // The owner pipe closes even on daemon SIGKILL. This supervisor owns cleanup,
 // including new-session descendants, without blocking the daemon thread.
 import { spawn } from 'node:child_process'
-import { createReadStream } from 'node:fs'
+import { Socket } from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { WorkerTree } from './worker-tree.mjs'
 const [command, ...args] = process.argv.slice(2)
@@ -34,7 +34,9 @@ async function stop(code = 0, signal = null) {
   }
   process.exit(code)
 }
-const owner = createReadStream(null, { fd: 3 })
+// A socket, not fs.createReadStream: a file stream parks a threadpool thread in a blocking read on the pipe, and
+// process.exit then never returns, so a worker that exited normally left its guard behind and was never restarted.
+const owner = new Socket({ fd: 3, readable: true, writable: false })
 owner.on('data', () => {})
 owner.on('end', () => { void stop(1, 'SIGTERM') })
 owner.on('error', () => { void stop(1, 'SIGTERM') })

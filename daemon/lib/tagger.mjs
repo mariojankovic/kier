@@ -378,7 +378,7 @@ export async function tagPending(db, { limit = 25 } = {}) {
   const items = pending(db, limit)
   // Quiet moments go to double checking tasks found earlier.
   if (!items.length) return { tagged: 0, ...(await doubleCheck(db)) }
-  if (!(await ollamaUp())) return { tagged: 0, waiting: items.length, error: 'Ollama is not running' }
+  if (!(await ollamaUp())) return { tagged: 0, waiting: items.length, error: 'the local model is not running' }
   const save = db.prepare(`insert or replace into tags (item_id, is_task, due, when_words, amount, urgency, summary, model, tagged_at, said)
     values (:item_id, :is_task, :due, :when_words, :amount, :urgency, :summary, :model, :tagged_at, :said)`)
   const none = { is_task: 0, when_words: '', due: '', amount: '', urgency: 0 }

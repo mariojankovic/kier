@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.11",
+    "date": "2026-11-12",
+    "title": "Kier's AI starts again by itself",
+    "notes": [
+      "Kier's own AI could stop answering after it shut down once, for example when the Mac ran short of memory. Sorting new messages and everything else that uses it then failed until Kier was restarted. It now starts again by itself.",
+      "The second opinion and the spoken brief recover the same way."
+    ],
+    "summary": "Kier's AI starts again by itself after it stops."
+  },
+  {
     "version": "0.7.10",
     "date": "2026-11-11",
     "title": "Kier opens again",
