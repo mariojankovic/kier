@@ -80,16 +80,52 @@ export async function signedFetch(secret, url, { method = 'GET', body, ...option
   return new Response(data, { status: response.status, headers: response.headers })
 }
 
-// Buffer signed output, including NDJSON. No partial answer is trusted before its MAC arrives.
+// Streamed replies (NDJSON) go out a line at a time. Each line is numbered and signed with the request's nonce, and a
+// signed empty line closes the reply: the app shows an answer as it forms, but never a line it can't verify, one out of
+// order or from another request, and a reply cut short is an error. The status and headers are signed up front.
+export const lineMAC = (secret, nonce, seq, line) => createHmac('sha256', secret).update(`kier-line-v1\n${nonce}\n${seq}\n`).update(line).digest('hex')
+export const streamMAC = (secret, nonce, status) => mac(secret, [nonce, status, 'lines-v1'].join('\n'))
+
+// Buffer signed output, unless the route asks for signed lines (res.streamLines) before it writes.
 export function signResponse(res, secret, nonce) {
-  const chunks = [], end = res.end.bind(res), head = res.writeHead.bind(res)
+  const chunks = [], end = res.end.bind(res), head = res.writeHead.bind(res), write = res.write.bind(res)
+  let streaming = false, seq = 0, rest = Buffer.alloc(0)
+  res.streamLines = () => { streaming = true }
+  const frame = line => write(Buffer.concat([Buffer.from(`${seq} ${lineMAC(secret, nonce, seq++, line)} `), line, Buffer.from('\n')]))
+  const open = () => {
+    if (res.headersSent) return
+    res.setHeader('x-kier-stream', 'lines-v1')
+    res.setHeader('x-kier-response', streamMAC(secret, nonce, res.statusCode))
+    head(res.statusCode)
+  }
+  // Complete lines go now; blank ones are skipped, since an empty line is the close.
+  const lines = chunk => {
+    rest = Buffer.concat([rest, Buffer.from(chunk)])
+    let i
+    while ((i = rest.indexOf(10)) >= 0) { const line = rest.subarray(0, i); rest = rest.subarray(i + 1); if (line.length) frame(line) }
+  }
   res.writeHead = (status, headers) => {
+    // A failure after a streamed reply began can't change its status; its error still goes as a signed line.
+    if (res.headersSent) return res
     res.statusCode = status
     for (const [key, value] of Object.entries(headers || {})) res.setHeader(key, value)
+    if (streaming) open()
     return res
   }
-  res.write = chunk => { if (chunk) chunks.push(Buffer.from(chunk)); return true }
+  res.write = chunk => {
+    if (!streaming) { if (chunk) chunks.push(Buffer.from(chunk)); return true }
+    open()
+    if (chunk) lines(chunk)
+    return true
+  }
   res.end = chunk => {
+    if (streaming) {
+      open()
+      if (chunk) lines(chunk)
+      if (rest.length) { frame(rest); rest = Buffer.alloc(0) }
+      frame(Buffer.alloc(0))
+      return end()
+    }
     if (chunk) chunks.push(Buffer.from(chunk))
     const body = Buffer.concat(chunks)
     res.setHeader('x-kier-response', responseMAC(secret, nonce, res.statusCode, body))

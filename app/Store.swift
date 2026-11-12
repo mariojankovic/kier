@@ -900,7 +900,7 @@ final class Store {
     pending[key] = q
     let history = (chats[key] ?? []).suffix(6).map { ["q": $0.q, "a": $0.a] }
     Task {
-      // Authenticate the complete NDJSON body before using any text, status or actions.
+      // Each NDJSON line is authenticated on its own before its text, status or actions are used (DaemonClient.lines).
       var request = daemonRequest(URL(string: base + "/api/ask/stream")!)
       request.httpMethod = "POST"
       request.timeoutInterval = 300
@@ -910,12 +910,12 @@ final class Store {
       request.httpBody = try? JSONSerialization.data(withJSONObject: body)
       var answered: UUID?
       do {
-        let (bytes, _) = try await daemonClient.data(for: request)
-        for line in String(decoding: bytes, as: UTF8.self).split(separator: "\n") {
-          guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+        for try await line in daemonClient.lines(for: request) {
+          guard let o = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else { continue }
           if let t = o["text"] as? String { partial[key] = t }
           if let s = o["status"] as? String { step[key] = s }
           if o["done"] as? Bool == true { answered = finish(q, agent: agent, key: key, o) }
+          if answered == nil, let e = o["error"] as? String { answered = finish(q, agent: agent, key: key, ["error": e]) }
           // What Kier took into your profile comes a moment after the answer.
           if let noted = o["noted"] as? String, let answered, let i = chats[key]?.firstIndex(where: { $0.id == answered }) {
             chats[key]?[i].note = noted

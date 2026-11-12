@@ -13,11 +13,32 @@ enum DaemonProof {
   }
   // Pure verifier, also compiled by the daemon's Swift policy tests.
   static func accepts(_ secret: Data, nonce: String, status: Int, body: Data, signature: String?) -> Bool {
+    same(signature, mac(secret, [nonce, String(status), hash(body)].joined(separator: "\n")))
+  }
+  private static func same(_ signature: String?, _ expected: String) -> Bool {
     guard let signature, signature.utf8.count == 64 else { return false }
-    let expected = mac(secret, [nonce, String(status), hash(body)].joined(separator: "\n"))
     var difference: UInt8 = 0
     for (a, b) in zip(signature.utf8, expected.utf8) { difference |= a ^ b }
     return difference == 0
+  }
+  // A streamed reply (http-auth.mjs signResponse): its status is signed up front, then each line on its own.
+  static func acceptsStream(_ secret: Data, nonce: String, status: Int, signature: String?) -> Bool {
+    same(signature, mac(secret, [nonce, String(status), "lines-v1"].joined(separator: "\n")))
+  }
+  static func line(_ secret: Data, nonce: String, seq: Int, payload: Data) -> String {
+    var h = HMAC<SHA256>(key: SymmetricKey(data: secret))
+    h.update(data: Data("kier-line-v1\n\(nonce)\n\(seq)\n".utf8))
+    h.update(data: payload)
+    return h.finalize().map { String(format: "%02x", $0) }.joined()
+  }
+  // "<seq> <mac> <payload>": the payload, when this is line number seq of this reply and its MAC holds, otherwise nil.
+  static func open(_ secret: Data, nonce: String, seq: Int, frame: Data) -> Data? {
+    let head = Data("\(seq) ".utf8)
+    guard frame.count >= head.count + 65, frame.prefix(head.count) == head,
+          frame[frame.startIndex + head.count + 64] == 0x20 else { return nil }
+    let signature = String(decoding: frame.dropFirst(head.count).prefix(64), as: UTF8.self)
+    let payload = Data(frame.dropFirst(head.count + 65))
+    return same(signature, line(secret, nonce: nonce, seq: seq, payload: payload)) ? payload : nil
   }
   static func seal(_ secret: Data, body: Data) throws -> Data {
     let key = HMAC<SHA256>.authenticationCode(for: Data("kier-request-body-v1".utf8), using: SymmetricKey(data: secret))
@@ -61,7 +82,7 @@ final class DaemonClient: @unchecked Sendable {
     guard count == bytes.count else { throw URLError(.cannotConnectToHost) }
     return Data(bytes)
   }
-  func data(for original: URLRequest) async throws -> (Data, URLResponse) {
+  private func signed(_ original: URLRequest) throws -> (URLRequest, Data, String) {
     guard let url = original.url, url.scheme == "http", url.host == "127.0.0.1", url.port != nil,
           url.user == nil, url.password == nil, url.fragment == nil,
           let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { throw URLError(.badURL) }
@@ -76,12 +97,48 @@ final class DaemonClient: @unchecked Sendable {
     request.setValue(timestamp, forHTTPHeaderField: "x-kier-time")
     request.setValue(nonce, forHTTPHeaderField: "x-kier-nonce")
     request.setValue(DaemonProof.request(key, method: request.httpMethod ?? "GET", target: target, timestamp: timestamp, nonce: nonce, body: body), forHTTPHeaderField: "x-kier-signature")
+    return (request, key, nonce)
+  }
+  func data(for original: URLRequest) async throws -> (Data, URLResponse) {
+    let (request, key, nonce) = try signed(original)
     let (data, response) = try await session.data(for: request)
     guard let http = response as? HTTPURLResponse,
           DaemonProof.accepts(key, nonce: nonce, status: http.statusCode, body: data, signature: http.value(forHTTPHeaderField: "x-kier-response")) else {
       throw URLError(.cannotConnectToHost)
     }
     return (data, response)
+  }
+  // The lines of a streamed reply as they arrive, each checked before it's handed on. A line that fails its check, comes
+  // out of order or follows the close ends the stream with an error, and so does a reply that stops before its close.
+  func lines(for original: URLRequest) -> AsyncThrowingStream<Data, Error> {
+    AsyncThrowingStream { continuation in
+      let task = Task {
+        do {
+          let (request, key, nonce) = try signed(original)
+          let (bytes, response) = try await session.bytes(for: request)
+          guard let http = response as? HTTPURLResponse, http.value(forHTTPHeaderField: "x-kier-stream") == "lines-v1",
+                DaemonProof.acceptsStream(key, nonce: nonce, status: http.statusCode, signature: http.value(forHTTPHeaderField: "x-kier-response")) else {
+            throw URLError(.cannotConnectToHost)
+          }
+          var seq = 0, frame = Data(), closed = false
+          // Split on the newline byte only: a model's answer may hold other line separators.
+          for try await byte in bytes {
+            guard byte == 0x0A else {
+              frame.append(byte)
+              if frame.count > 8 << 20 { throw URLError(.cannotConnectToHost) }
+              continue
+            }
+            guard !closed, let payload = DaemonProof.open(key, nonce: nonce, seq: seq, frame: frame) else { throw URLError(.cannotConnectToHost) }
+            seq += 1
+            frame.removeAll(keepingCapacity: true)
+            if payload.isEmpty { closed = true } else { continuation.yield(payload) }
+          }
+          guard closed, frame.isEmpty else { throw URLError(.networkConnectionLost) }
+          continuation.finish()
+        } catch { continuation.finish(throwing: error) }
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
   }
   func send(_ request: URLRequest, completion: @escaping @Sendable (Data?, URLResponse?, Error?) -> Void = { _, _, _ in }) {
     Task {

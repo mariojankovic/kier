@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.12",
+    "date": "2026-11-12",
+    "title": "Chat answers show as they're written",
+    "notes": [
+      "Answers in chat appear word by word again, with what Kier is doing while it looks things up, instead of all at once when they're finished.",
+      "An answer no longer waits for Kier to note what you told it about yourself."
+    ],
+    "summary": "Chat answers show as they're written again."
+  },
+  {
     "version": "0.7.11",
     "date": "2026-11-12",
     "title": "Kier's AI starts again by itself",

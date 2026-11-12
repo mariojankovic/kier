@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { execFileSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createServer } from 'node:http'
-import { requestMAC, responseMAC, openBody, verifier, signedHeaders, signedFetch, signResponse } from '../lib/http-auth.mjs'
+import { requestMAC, responseMAC, openBody, verifier, signedHeaders, signedFetch, signResponse, lineMAC, streamMAC } from '../lib/http-auth.mjs'
 
 const dir = mkdtempSync(join(tmpdir(), 'kier-native-auth-'))
 chmodSync(dir, 0o700)
@@ -89,6 +89,77 @@ test('actual Swift transport rejects a fake listener and redirects, then recover
   assert.equal(calls, 3)
   mode = 'fake'
   await assert.rejects(signedFetch(secret, url, { method: 'POST', body: 'PRIVATE_FIXTURE' }), /DAEMON_UNAVAILABLE/)
+})
+
+// Chat answers show as they form (0.7.11 had them arrive all at once): each line is checked on its own, so a changed,
+// reordered, foreign or cut-off line never reaches the app.
+test('Swift reads a streamed reply line by line and rejects changed, reordered, foreign and cut-off lines', async t => {
+  let mode = 'good'
+  const verify = verifier(secret)
+  const framed = (n, line, key = nonce) => `${n} ${lineMAC(secret, key, n, line)} ${line}\n`
+  const server = createServer(async (req, res) => {
+    const chunks = []; for await (const c of req) chunks.push(c)
+    const requestNonce = verify(req.method, req.url, req.headers, Buffer.concat(chunks))
+    assert.ok(requestNonce)
+    if (mode === 'good') {
+      signResponse(res, secret, requestNonce)
+      res.streamLines()
+      res.writeHead(200, { 'content-type': 'application/x-ndjson' })
+      res.write('{"status":"Thinking"}\n{"text":"Nika')
+      await new Promise(r => setTimeout(r, 1500))
+      res.write(' and Tea\u2028fixture"}\n')
+      return res.end('{"done":true}\n')
+    }
+    const key = mode === 'foreign' ? 'c'.repeat(32) : requestNonce
+    res.writeHead(200, { 'x-kier-stream': 'lines-v1', 'x-kier-response': streamMAC(secret, requestNonce, 200) })
+    const first = framed(0, '{"text":"fine"}', key)
+    if (mode === 'changed') return res.end(first + framed(1, '{"text":"Filip"}', key).replace('Filip', 'Borna') + framed(2, '', key))
+    if (mode === 'reordered') return res.end(first + framed(2, '{"text":"Filip"}', key) + framed(1, '', key))
+    if (mode === 'cut') return res.end(first + framed(1, '{"text":"Filip"}', key))
+    return res.end(first + framed(1, '', key))
+  })
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  t.after(() => server.close())
+  const url = `http://127.0.0.1:${server.address().port}/api/ask/stream`
+  writeFileSync(join(dir, 'stream.swift'), `import Foundation
+@main struct Probe {
+  static func main() async {
+    let client = DaemonClient(dataDirectory: CommandLine.arguments[1])
+    var request = URLRequest(url: URL(string: CommandLine.arguments[2])!)
+    request.httpMethod = "POST"
+    request.httpBody = Data("PRIVATE_FIXTURE".utf8)
+    let start = Date()
+    var seen: [[String: Any]] = []
+    var failed = false
+    do {
+      for try await line in client.lines(for: request) {
+        seen.append(["line": String(decoding: line, as: UTF8.self), "at": Date().timeIntervalSince(start)])
+      }
+    } catch { failed = true }
+    let out = try! JSONSerialization.data(withJSONObject: ["lines": seen, "failed": failed])
+    print(String(decoding: out, as: UTF8.self))
+  }
+}
+`)
+  const bin = join(dir, 'stream-test')
+  execFileSync('swiftc', ['../app/DaemonClient.swift', join(dir, 'stream.swift'), '-o', bin], { timeout: 60000, stdio: 'pipe' })
+  const probe = async m => { mode = m; return JSON.parse((await run(bin, [dir, url], { timeout: 15000 })).stdout) }
+  const good = await probe('good')
+  assert.equal(good.failed, false)
+  assert.deepEqual(good.lines.map(l => JSON.parse(l.line)), [{ status: 'Thinking' }, { text: 'Nika and Tea\u2028fixture' }, { done: true }])
+  assert.ok(good.lines.at(-1).at - good.lines[0].at > 1, 'the first line arrives before the reply is finished')
+  for (const m of ['changed', 'reordered']) {
+    const r = await probe(m)
+    assert.equal(r.failed, true, m)
+    assert.deepEqual(r.lines.map(l => l.line), ['{"text":"fine"}'], m)
+  }
+  // Genuine lines of a reply that stops early still arrive; the missing close is the error.
+  const cut = await probe('cut')
+  assert.equal(cut.failed, true)
+  assert.deepEqual(cut.lines.map(l => l.line), ['{"text":"fine"}', '{"text":"Filip"}'])
+  const foreign = await probe('foreign')
+  assert.equal(foreign.failed, true)
+  assert.deepEqual(foreign.lines, [])
 })
 
 test('future timestamps remain replay-protected for the full acceptance window', () => {

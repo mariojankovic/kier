@@ -338,6 +338,8 @@ export function serve(db, { install, port = config.port } = {}) {
         const { q, agent, history, item, key } = JSON.parse(body)
         if (!q || typeof q !== 'string') return json(res, { error: 'no question' }, 400)
         const past = conversation(key, history)
+        // The app gets each line as it's written, signed on its own (http-auth.mjs), so the answer shows as it forms.
+        res.streamLines?.()
         res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-cache' })
         const send = (o) => res.write(`${JSON.stringify(o)}\n`)
         const r = await ask(db, q.slice(0, 2000), ['claude', 'codex', 'kier'].includes(agent) ? agent : 'kier', past, typeof item === 'string' ? item : null,
