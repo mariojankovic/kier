@@ -19,5 +19,5 @@ test('Setup records the terms version the owner agreed to', async () => {
 })
 
 test('the terms link is the public https page', () => {
-  assert.equal(TERMS_URL, 'https://getkier.com/terms/')
+  assert.equal(TERMS_URL, 'https://kier.so/ai/terms/')
 })

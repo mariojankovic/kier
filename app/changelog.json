@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.13",
+    "date": "2026-11-13",
+    "title": "Kier is now Kier AI",
+    "notes": [
+      "Kier is now called Kier AI, and its home is kier.so/ai.",
+      "Nothing else changes: your vault, settings, shortcuts and chats stay as they are."
+    ],
+    "summary": "Kier is now Kier AI, at kier.so/ai."
+  },
+  {
     "version": "0.7.12",
     "date": "2026-11-12",
     "title": "Chat answers show as they're written",

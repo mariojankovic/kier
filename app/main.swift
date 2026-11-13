@@ -78,8 +78,8 @@ func showProblem(_ detail: String) -> Never {
   app.activate()
   let alert = NSAlert()
   alert.alertStyle = .critical
-  alert.messageText = "Kier couldn't start"
-  alert.informativeText = detail + "\n\nTry again, or look at the log to see what happened. If it keeps failing, download Kier again from getkier.com and replace the copy in Applications."
+  alert.messageText = "Kier AI couldn't start"
+  alert.informativeText = detail + "\n\nTry again, or look at the log to see what happened. If it keeps failing, download Kier AI again from kier.so/ai and replace the copy in Applications."
   alert.addButton(withTitle: "Try Again")
   alert.addButton(withTitle: "Show Log")
   alert.addButton(withTitle: "Quit")
@@ -559,15 +559,15 @@ final class Bar: NSObject, NSMenuDelegate {
     menu.addItem(.separator())
     // Reading the brief aloud is switched off for now ; speak() and stopTalking() stay for when it's back.
     menu.addItem(entry(MainActor.assumeIsolated { companion?.visible ?? false } ? "Hide the orb" : "Show the orb", #selector(toggleOrb)))
-    menu.addItem(entry("Open Kier", #selector(openTimeline)))
+    menu.addItem(entry("Open Kier AI", #selector(openTimeline)))
     menu.addItem(entry("Vault", #selector(openVault)))
     menu.addItem(entry("Setup", #selector(openSetup)))
     if let u = MainActor.assumeIsolated({ updater }) {
       menu.addItem(.separator())
-      menu.addItem(entry(MainActor.assumeIsolated { u.pending.map { "Update to Kier \($0)" } ?? "Check for Updates…" }, #selector(checkUpdates)))
+      menu.addItem(entry(MainActor.assumeIsolated { u.pending.map { "Update to Kier AI \($0)" } ?? "Check for Updates…" }, #selector(checkUpdates)))
     }
     menu.addItem(.separator())
-    menu.addItem(entry("Quit Kier", #selector(quitKier)))
+    menu.addItem(entry("Quit Kier AI", #selector(quitKier)))
   }
 
   private func entry(_ title: String, _ action: Selector) -> NSMenuItem {

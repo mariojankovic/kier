@@ -53,7 +53,7 @@ export function setSource(id, on) {
 
 // The terms of use the owner agreed to in Setup, by version, so changed terms are asked for again.
 export const TERMS_VERSION = '2026-11-05'
-export const TERMS_URL = 'https://getkier.com/terms/'
+export const TERMS_URL = 'https://kier.so/ai/terms/'
 export const termsAccepted = () => config.terms?.version === TERMS_VERSION
 export const acceptTerms = () => save({ terms: { version: TERMS_VERSION, at: now() } })
 

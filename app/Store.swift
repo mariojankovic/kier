@@ -573,7 +573,7 @@ final class Store {
     struct Report: Decodable { let text: String }
     guard let r: Report = await get("/api/diagnostics") else { return nil }
     let info = Bundle.main.infoDictionary
-    return "Kier \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))\n\(r.text)"
+    return "Kier AI \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))\n\(r.text)"
   }
 
   func card(_ id: String) async -> Card? {
@@ -820,7 +820,7 @@ final class Store {
     if s.opensIn == "app" { Deliver.open(session: s.title, done: done); return }
     Task {
       let r: OpenResult? = await post("/api/handoff", ["id": id, "open": true])
-      done(r == nil ? "Kier isn't running" : r?.error)
+      done(r == nil ? "Kier AI isn't running" : r?.error)
     }
   }
 

@@ -106,7 +106,7 @@ export function addresses(value) {
 const display = a => a?.name || a?.email || ''
 export const conversation = (subject, other) => String(subject || '').replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/i, '').trim() || other
 const sentBox = s => /(?:^|[\/\s.])(?:sent(?: messages| mail| items)?|sentmail|poslano|poslane|gesendet)(?:$|[\/\s.])/i.test(String(s || ''))
-const automated = (from, subject, snippet, list) => !!list || /(?:^|[._-])(?:no[._-]?reply|do[._-]?not[._-]?reply|mailer[._-]?daemon|newsletter|notifications?)(?:[._@-]|$)/i.test(from)
+export const automated = (from, subject, snippet, list) => !!list || /(?:^|[._-])(?:no[._-]?reply|do[._-]?not[._-]?reply|mailer[._-]?daemon|newsletter|notifications?)(?:[._@-]|$)/i.test(from)
   || /\b(?:newsletter|unsubscribe|payment receipt|order confirmation|your receipt|your invoice|shipping confirmation)\b/i.test(`${subject}\n${snippet}`)
 const messageID = value => {
   const id = String(value || '').trim().replace(/^<|>$/g, '')

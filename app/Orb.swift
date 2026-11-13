@@ -210,7 +210,7 @@ struct KierMark: View {
       return true
     }
     image.isTemplate = true
-    image.accessibilityDescription = "Kier"
+    image.accessibilityDescription = "Kier AI"
     return image
   }
 
@@ -735,11 +735,11 @@ final class Companion: NSObject {
     add("Ting when something new comes in") { [weak self] in self?.defaults.set(!(self?.sound ?? true), forKey: "kierSound") }
     m.items.last?.state = sound ? .on : .off
     m.addItem(.separator())
-    add("Open Kier") { viewer.show("/") }
+    add("Open Kier AI") { viewer.show("/") }
     add("What's New") { [weak self] in self?.openNotes() }
-    if let u = updater { add(u.pending.map { "Update to Kier \($0)" } ?? "Check for Updates…") { u.checkNow() } }
+    if let u = updater { add(u.pending.map { "Update to Kier AI \($0)" } ?? "Check for Updates…") { u.checkNow() } }
     m.addItem(.separator())
-    add("Quit Kier") { viewer.quit() }
+    add("Quit Kier AI") { viewer.quit() }
     return m
   }
 
@@ -993,7 +993,7 @@ final class Companion: NSObject {
     let model = ToastModel()
     toast = model
     // Said as what it is: under a bare "Kier 0.4.1", the release title in the nudge's place read as a task.
-    let host = FirstClickHost(rootView: NudgeView(model: model, line: "What's new in Kier \(version)", text: release.title, actions: [
+    let host = FirstClickHost(rootView: NudgeView(model: model, line: "What's new in Kier AI \(version)", text: release.title, actions: [
       .init(symbol: "doc.text", help: "What's new") { [weak self] in self?.hideToast(); self?.openNotes() },
       .init(symbol: "xmark", help: "Later, from the island's menu") { [weak self] in self?.hideToast() },
     ], open: { [weak self] in self?.hideToast(); self?.openNotes() }, hovered: { [weak self] inside in self?.toastHovered(inside) }))
@@ -1545,9 +1545,9 @@ struct CompanionView: View {
             Button { store.checkNow() } label: { Label(store.checking ? "Checking…" : "Refresh", systemImage: "arrow.clockwise") }
               .disabled(store.checking)
             Button { viewer.show("/setup") } label: { Label("Settings", systemImage: "gearshape") }
-            Button { viewer.show("/") } label: { Label("Open Kier", systemImage: "macwindow") }
+            Button { viewer.show("/") } label: { Label("Open Kier AI", systemImage: "macwindow") }
             Divider()
-            Button { viewer.quit() } label: { Label("Quit Kier", systemImage: "power") }
+            Button { viewer.quit() } label: { Label("Quit Kier AI", systemImage: "power") }
           } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24).contentShape(Rectangle()) }
           .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
           .accessibilityLabel("More options").help("More options")
@@ -1605,7 +1605,7 @@ struct CompanionView: View {
                 .buttonStyle(.borderless).font(.caption.weight(.medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 8).padding(.vertical, 8)
-                .help("Open the full Done list in Kier")
+                .help("Open the full Done list in Kier AI")
             }
           }
         }
@@ -1760,7 +1760,7 @@ struct NotesPage: View {
       HStack {
         Button(action: back) { Label("Back", systemImage: "chevron.left") }.buttonStyle(.borderless).focusable(false)
         Spacer()
-        Button("All changes") { if let url = URL(string: "https://getkier.com/changelog/") { LinkPolicy.open(url) } }
+        Button("All changes") { if let url = URL(string: "https://kier.so/ai/changelog/") { LinkPolicy.open(url) } }
           .buttonStyle(.borderless).focusable(false)
       }
       .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
@@ -1770,7 +1770,7 @@ struct NotesPage: View {
           Text("What's new").font(.title3.weight(.medium))
           ForEach(Changelog.all.prefix(6)) { r in
             VStack(alignment: .leading, spacing: 6) {
-              Text("Kier \(r.version), \(day(r.date))").font(.caption).foregroundStyle(.secondary)
+              Text("Kier AI \(r.version), \(day(r.date))").font(.caption).foregroundStyle(.secondary)
               Text(r.title).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
               ForEach(r.notes, id: \.self) { note in
                 Text(note).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -2051,7 +2051,7 @@ struct ItemPage: View {
         Text("Finding the session it belongs to…")
       }
       Divider()
-      Button("Show in Kier") { viewer.show("/"); store.select(card) }
+      Button("Show in Kier AI") { viewer.show("/"); store.select(card) }
     } label: {
       Label(handed ?? (copied ? "Copied, paste with ⌘V" : "Hand off"), systemImage: handed != nil || copied ? "checkmark" : "arrow.up.forward")
     } primaryAction: {

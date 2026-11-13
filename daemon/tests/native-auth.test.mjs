@@ -106,7 +106,8 @@ test('Swift reads a streamed reply line by line and rejects changed, reordered, 
       res.streamLines()
       res.writeHead(200, { 'content-type': 'application/x-ndjson' })
       res.write('{"status":"Thinking"}\n{"text":"Nika')
-      await new Promise(r => setTimeout(r, 1500))
+      // Long enough that a busy Mac delaying the client can't hide the gap (the check below wants 1 s of it).
+      await new Promise(r => setTimeout(r, 3000))
       res.write(' and Tea\u2028fixture"}\n')
       return res.end('{"done":true}\n')
     }

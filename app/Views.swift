@@ -260,7 +260,7 @@ private struct Sidebar: View {
     .background(Kier.sidebar)
     .safeAreaInset(edge: .bottom) {
       if store.offline {
-        Label("Kier is restarting", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary).padding(12)
+        Label("Kier AI is restarting", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary).padding(12)
       }
     }
   }
@@ -1426,7 +1426,7 @@ struct SetupView: View {
         }
       }
           Panel(title: "Shortcuts", footer: "Click one and press the keys you'd like, with Command, Option or Control. Escape keeps it as it was.") {
-        row("Open Kier", "From anywhere, even with the island hidden.", symbol: "capsule") {
+        row("Open Kier AI", "From anywhere, even with the island hidden.", symbol: "capsule") {
           ShortcutField(name: "open", fallback: .open)
         }
         row("Find anything", "Search everything Kier has read, the way you'd ask for it.", symbol: "magnifyingglass") {

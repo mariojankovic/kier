@@ -98,7 +98,7 @@ import SwiftUI
     answer = nil
     installFound = false
     guard asked || was else { return }
-    offer.phase = .failed(Self.unreachable(error) ? "Couldn't reach the update server. Kier tries again on its own." : error.localizedDescription)
+    offer.phase = .failed(Self.unreachable(error) ? "Couldn't reach the update server. Kier AI tries again on its own." : error.localizedDescription)
     show?()
   }
 
@@ -245,10 +245,10 @@ struct UpdateView: View {
 
   private var line: String {
     switch offer.phase {
-    case .available: return "Kier \(offer.version) is out"
-    case .downloading: return "Downloading Kier \(offer.version)"
-    case .installing: return "Installing Kier \(offer.version)"
-    case .latest: return "Kier \(offer.version)"
+    case .available: return "Kier AI \(offer.version) is out"
+    case .downloading: return "Downloading Kier AI \(offer.version)"
+    case .installing: return "Installing Kier AI \(offer.version)"
+    case .latest: return "Kier AI \(offer.version)"
     case .failed: return "Couldn't update"
     }
   }
@@ -256,9 +256,9 @@ struct UpdateView: View {
   private var text: String {
     switch offer.phase {
     case .available: return offer.notes.isEmpty ? "A new version is ready to install." : offer.notes
-    case .downloading: return "Kier restarts on its own when it's in."
+    case .downloading: return "Kier AI restarts on its own when it's in."
     case .installing: return "Restarting in a moment."
-    case .latest: return "You have the latest Kier."
+    case .latest: return "You have the latest Kier AI."
     case let .failed(why): return why
     }
   }

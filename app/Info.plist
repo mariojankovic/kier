@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Kier</string>
+	<string>Kier AI</string>
 	<key>CFBundleExecutable</key>
 	<string>Kier</string>
 	<key>CFBundleIconFile</key>
@@ -11,13 +11,13 @@
 	<key>CFBundleIdentifier</key>
 	<string>com.getkier.kier</string>
 	<key>CFBundleName</key>
-	<string>Kier</string>
+	<string>Kier AI</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.7.12</string>
+	<string>0.7.13</string>
 	<key>CFBundleVersion</key>
-	<string>104</string>
+	<string>105</string>
 	<key>KierNode</key>
 	<string>__NODE__</string>
 	<key>KierRoot</key>

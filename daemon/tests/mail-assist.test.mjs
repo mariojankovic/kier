@@ -220,3 +220,30 @@ test('drafts work with an empty vault and all user-facing fields avoid long dash
   assert.equal(result.text, 'Sure - next week - works.')
   assert.doesNotMatch(JSON.stringify(result), /[\u2013\u2014]/)
 })
+
+// Alerts for mail worth seeing: real people, decided from Kier's records; bulk mail never, whatever the model says.
+test('triage with alert says who wrote and whether the mail is worth an alert', async t => {
+  const db = database(t)
+  addItems(db, [{ id: 'sent-to-filip', source: 'mail', sender: 'Sam', fromMe: true, thread: 'Studio keys', ts: now() - 500, text: 'Keys are with Tea.',
+    meta: { ownerSent: true, from: [{ email: 'sam@example.test' }], to: [{ name: 'Filip', email: 'filip@example.test' }] } }])
+  const contacts = address => ({ known: address === 'nika@example.test' })
+  const triage = (from, text, answer, extra = {}) => mailAssist(db, { task: 'triage', alert: true, account: 'sam@example.test', thread: { subject: extra.subject || 'Hello',
+    messages: [...(extra.before || []), { from_name: 'Someone', from_email: from, to: ['sam@example.test'], date, text }] } },
+  { fetchModel: model(answer), clock: () => 0, lookup: contacts })
+  const people = '{"bundle":"people","important":false}', urgent = '{"bundle":"updates","important":true}', promo = '{"bundle":"promos","important":false}'
+  assert.deepEqual(await triage('nika@example.test', 'Dinner on Friday?', people), { bundle: 'people', important: false, person: 'known', notify: true, seconds: 0 })
+  assert.deepEqual(await triage('filip@example.test', 'Got the keys, thanks.', people), { bundle: 'people', important: false, person: 'known', notify: true, seconds: 0 })
+  assert.equal((await triage('filip@example.test', 'New arrivals this week.', promo)).notify, false)
+  const answered = { before: [{ from_email: 'sam@example.test', to: ['borna@example.test'], date: date - 60, text: 'Sending the invoice today.' }] }
+  assert.equal((await triage('borna@example.test', 'Received, thanks.', people, answered)).person, 'known')
+  assert.deepEqual(await triage('lucija@example.test', 'Hi, we met at the conference.', people), { bundle: 'people', important: false, person: 'new', notify: false, seconds: 0 })
+  assert.equal((await triage('lucija@example.test', 'The venue changed to tomorrow at 9.', '{"bundle":"people","important":true}')).notify, true)
+  for (const [from, subject] of [['no-reply@shop.example.test', 'Your order'], ['jonas@example.test', 'Weekly newsletter'], ['nika@example.test', 'Your receipt from the studio']]) {
+    assert.deepEqual(await triage(from, 'Details inside.', urgent, { subject }), { bundle: 'updates', important: true, person: 'automated', notify: false, seconds: 0 })
+  }
+  // Without alert, the answer is exactly what it was.
+  const plain = await mailAssist(db, request('triage'), { fetchModel: model(people), clock: () => 0, lookup: contacts })
+  assert.deepEqual(plain, { bundle: 'people', important: false, seconds: 0 })
+  assert.throws(() => validateMailAssist({ ...request('summarize'), alert: true }), rejectsStatus(400))
+  assert.throws(() => validateMailAssist({ ...request('triage'), alert: 'yes' }), rejectsStatus(400))
+})

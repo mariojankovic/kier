@@ -35,7 +35,7 @@ final class Viewer: NSObject, NSWindowDelegate {
       host.sceneBridgingOptions = [.toolbars, .title]
       let w = NSWindow(contentViewController: host)
       // Never "Untitled" while SwiftUI's own title is on its way.
-      w.title = "Kier"
+      w.title = "Kier AI"
       w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
       // Black glass all the way to the edges, title bar included (see Glass.swift).
       w.titlebarAppearsTransparent = true
@@ -88,8 +88,8 @@ final class Viewer: NSObject, NSWindowDelegate {
 
   private func showQuitError() {
     let alert = NSAlert()
-    alert.messageText = "Kier couldn’t quit"
-    alert.informativeText = "The background service couldn’t stop. Try Quit Kier again."
+    alert.messageText = "Kier AI couldn’t quit"
+    alert.informativeText = "The background service couldn’t stop. Try Quit Kier AI again."
     alert.addButton(withTitle: "OK")
     alert.runModal()
   }
@@ -109,7 +109,7 @@ final class Viewer: NSObject, NSWindowDelegate {
       m.target = target
       return m
     }
-    submenu("Kier", [item("Hide Kier", #selector(NSApplication.hide(_:)), "h"), item("Quit Kier", #selector(quit), "q", target: self)])
+    submenu("Kier AI", [item("Hide Kier AI", #selector(NSApplication.hide(_:)), "h"), item("Quit Kier AI", #selector(quit), "q", target: self)])
     submenu("Edit", [
       item("Undo", Selector(("undo:")), "z"), item("Redo", Selector(("redo:")), "Z"), .separator(),
       item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
