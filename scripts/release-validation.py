@@ -159,7 +159,8 @@ def bundle(gate, app, source):
         if (resources / 'Kier.icns').exists():
             icon_temp, icon = rebuilt_icon(source)
         framework = None
-        exact = {'Resources/orb.png': source / 'app/icon/orb-hd.png', 'Resources/changelog.json': source / 'app/changelog.json'}
+        exact = {'Resources/orb.png': source / 'app/icon/orb-hd.png', 'Resources/changelog.json': source / 'app/changelog.json',
+                 'Resources/en.lproj/InfoPlist.strings': source / 'app/en.lproj/InfoPlist.strings'}
         if node_dir: exact['Resources/runtime/LICENSE'] = node_dir / 'LICENSE'
         for path in sorted(app.rglob('*')):
             if path.is_symlink() or not path.is_file() or path == info: continue

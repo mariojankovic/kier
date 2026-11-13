@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.7.14",
+    "date": "2026-11-13",
+    "title": "Kier AI in Finder and the Dock",
+    "notes": [
+      "Finder, the Dock and Spotlight call the app Kier AI too. If the Dock still says Kier, remove it from the Dock and add it again."
+    ],
+    "summary": "Finder and the Dock call the app Kier AI too."
+  },
+  {
     "version": "0.7.13",
     "date": "2026-11-13",
     "title": "Kier is now Kier AI",

@@ -75,6 +75,9 @@ cp app/icon/orb-hd.png "$RES/orb.png"
 cp -R app/brands "$RES/brands"
 # What changed in each version, for the app's What's new page.
 cp app/changelog.json "$RES/changelog.json"
+# The name Finder and the Dock show (Kier AI), while the file stays Kier.app. macOS uses it only while Info.plist's
+# CFBundleDisplayName matches the file name (Kier), which is how it tells a rename by the owner.
+mkdir -p "$RES/en.lproj" && cp app/en.lproj/InfoPlist.strings "$RES/en.lproj/InfoPlist.strings"
 ICONSET="$(mktemp -d)/Kier.iconset"
 mkdir -p "$ICONSET"
 for s in "16" "32" "128" "256" "512"; do

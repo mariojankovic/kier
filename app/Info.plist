@@ -2,8 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Kier AI</string>
+	<string>Kier</string>
 	<key>CFBundleExecutable</key>
 	<string>Kier</string>
 	<key>CFBundleIconFile</key>
@@ -15,13 +17,15 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.7.13</string>
+	<string>0.7.14</string>
 	<key>CFBundleVersion</key>
-	<string>105</string>
+	<string>106</string>
 	<key>KierNode</key>
 	<string>__NODE__</string>
 	<key>KierRoot</key>
 	<string>__ROOT__</string>
+	<key>LSHasLocalizedDisplayName</key>
+	<true/>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>

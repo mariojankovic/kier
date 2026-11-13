@@ -1,0 +1,3 @@
+/* What Finder, the Dock and Spotlight call Kier.app: the file keeps its name, so the login agent and updates find it. */
+"CFBundleDisplayName" = "Kier AI";
+"CFBundleName" = "Kier AI";
