@@ -599,7 +599,7 @@ struct CardRow: View {
   @ViewBuilder private func actions(_ kind: Kind) -> some View {
     HStack(spacing: 14) {
       if card.needsConfirmation {
-        Button("Confirm") { store.mark(card, card.confirmStatus) }.buttonStyle(PillButton(prominent: true))
+        Button(card.confirmAnswer) { store.mark(card, card.confirmStatus) }.buttonStyle(PillButton(prominent: true))
         Button(card.looksUnneeded ? "Keep" : "Not done") { store.mark(card, "open") }.buttonStyle(TextButton())
       } else if card.state == "handled" {
         Button("Not done") { store.mark(card, "open") }.buttonStyle(PillButton(prominent: true))

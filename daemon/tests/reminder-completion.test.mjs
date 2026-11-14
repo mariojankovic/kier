@@ -156,7 +156,9 @@ test('native reminder sync requires the verified completion policy', () => {
   const source = readFileSync('../app/PhoneSync.swift', 'utf8')
   assert.match(source, /answer.completionPolicy == "owner-verified" && answer.close.contains/)
   const ui = readFileSync('../app/Orb.swift', 'utf8')
-  assert.match(ui, /card.needsConfirmation \? "Confirm" : "Mark done"/)
+  // A card Kier only thinks is done keeps its own answer and its own group; the owner's tap closes it.
+  assert.match(ui, /card.needsConfirmation \? card.confirmAnswer : "Mark done"/)
+  assert.match(ui, /probablyDone: \[Card\] \{ panel.filter\(\\.needsConfirmation\) \}/)
   assert.match(ui, /if card.needsConfirmation/)
 })
 

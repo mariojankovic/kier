@@ -98,8 +98,9 @@ test('browser bootstrap and subsequent page navigation attach headers only to th
 test('raw secrets, stale signatures, replays and wrong signatures cannot read owner data', async () => {
   const path = '/api/capture-policy'
   assert.equal((await get(path, { 'x-kier-token': secret })).status, 401)
-  assert.equal((await get(path, signedHeaders(secret, 'GET', path, '', String(Math.floor(Date.now() / 1000) - 61)))).status, 401)
-  assert.equal((await get(path, signedHeaders(secret, 'GET', path, '', String(Math.floor(Date.now() / 1000) + 61)))).status, 401)
+  // Well outside the 60 second window, so a second ticking over between signing and checking can't bring one back in.
+  assert.equal((await get(path, signedHeaders(secret, 'GET', path, '', String(Math.floor(Date.now() / 1000) - 120)))).status, 401)
+  assert.equal((await get(path, signedHeaders(secret, 'GET', path, '', String(Math.floor(Date.now() / 1000) + 120)))).status, 401)
   assert.equal((await get(path, signedHeaders('wrong', 'GET', path))).status, 401)
   const headers = signedHeaders(secret, 'GET', path)
   const response = await get(path, headers)

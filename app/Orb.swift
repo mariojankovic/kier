@@ -1478,10 +1478,13 @@ struct CompanionView: View {
   @AppStorage("kierAgent") private var agent = "claude"
   @AppStorage("kierShowDone") private var showDone = false
 
-  private var waiting: [Card] {
+  private var panel: [Card] {
     guard let b = store.brief else { return [] }
     return Array(b.panel.prefix(12))
   }
+  // Still yours to do. What Kier thinks is already done or not needed goes under "Probably done" instead.
+  private var waiting: [Card] { panel.filter { !$0.needsConfirmation } }
+  private var probablyDone: [Card] { panel.filter(\.needsConfirmation) }
 
   // The ones the second opinion doubts: listed quietly under the rest, so nothing real goes missing.
   private var maybe: [Card] { Array((store.brief?.maybe ?? []).prefix(6)) }
@@ -1566,9 +1569,17 @@ struct CompanionView: View {
                     done: { store.archive(c.key) }, doneHelp: "Put this chat away") { go(.chat(c.key)) }
           }
           ForEach(waiting) { c in
-            HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, c.confirmStatus) }, doneHelp: c.needsConfirmation ? "Confirm" : "Mark done", evidence: c.needsConfirmation ? c.reason : nil) { go(.item(c.id)) }
+            HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, "done") }) { go(.item(c.id)) }
           }
           if waiting.isEmpty { AllClear(done: doneByKier.filter { $0.state == "handled" }.count, next: comingUp.isEmpty ? nextEvent : nil) }
+          // What Kier thinks is already settled, with why: the tick agrees, the card itself has Not done or Keep.
+          if !probablyDone.isEmpty {
+            Text("Probably done").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 2)
+            ForEach(probablyDone) { c in
+              HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, c.confirmStatus) }, doneHelp: c.confirmAnswer, evidence: c.reason) { go(.item(c.id)) }
+            }
+          }
           if !comingUp.isEmpty {
             Text("Coming up").font(.caption.weight(.medium)).foregroundStyle(.secondary)
               .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 2)
@@ -1582,7 +1593,7 @@ struct CompanionView: View {
             Text("Maybe yours").font(.caption.weight(.medium)).foregroundStyle(.secondary)
               .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 2)
             ForEach(maybe) { c in
-              HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, c.confirmStatus) }, doneHelp: c.needsConfirmation ? "Confirm" : "Mark done", evidence: c.needsConfirmation ? c.reason : nil) { go(.item(c.id)) }
+              HomeRow(icon: Kind.of(c.card).symbol, brand: c.brand, kicker: c.kicker, title: c.headline, done: { store.mark(c, c.confirmStatus) }, doneHelp: c.needsConfirmation ? c.confirmAnswer : "Mark done", evidence: c.needsConfirmation ? c.reason : nil) { go(.item(c.id)) }
                 .opacity(0.75)
             }
           }
@@ -1713,8 +1724,7 @@ struct HomeRow: View {
     HStack(alignment: .center, spacing: 10) {
       if let done {
         Button(action: done) {
-          if doneHelp == "Confirm" { Text("Confirm").font(.caption) }
-          else { Image(systemName: hover ? "checkmark.circle" : "circle").font(.system(size: 15)) }
+          Image(systemName: hover ? "checkmark.circle" : "circle").font(.system(size: 15))
         }
           .buttonStyle(.borderless).foregroundStyle(.secondary).help(doneHelp).focusable(false)
       } else {
@@ -1904,7 +1914,7 @@ struct ItemPage: View {
         if ticked {
           Button("Put back") { store.mark(card, "open"); back() }.buttonStyle(.borderless).focusable(false).help("Not done: back on the list")
         } else {
-          Button { store.mark(card, card.confirmStatus); back() } label: { Label(card.needsConfirmation ? "Confirm" : "Mark done", systemImage: "checkmark") }.buttonStyle(.borderless).focusable(false)
+          Button { store.mark(card, card.confirmStatus); back() } label: { Label(card.needsConfirmation ? card.confirmAnswer : "Mark done", systemImage: "checkmark") }.buttonStyle(.borderless).focusable(false)
         }
       }
       .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)

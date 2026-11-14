@@ -45,6 +45,8 @@ struct Card: Codable, Identifiable, Hashable {
   var needsConfirmation: Bool { looksDone || looksUnneeded }
   var suggestionLabel: String { looksUnneeded ? "Not needed?" : "Looks done" }
   var confirmStatus: String { looksUnneeded ? "dismissed" : "done" }
+  // The answer that agrees with Kier when it thinks a card is settled.
+  var confirmAnswer: String { looksUnneeded ? "Take it off" : "Yes, done" }
 }
 
 struct Event: Codable, Identifiable, Hashable {

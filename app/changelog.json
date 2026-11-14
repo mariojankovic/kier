@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.15",
+    "date": "2026-11-14",
+    "title": "Probably done, apart from your to-dos",
+    "notes": [
+      "Cards Kier thinks are already done or no longer needed sit under Probably done, with why, instead of among your to-dos with a Confirm button. Tick one to agree; open it to keep it.",
+      "They no longer count as waiting on you."
+    ],
+    "summary": "Cards Kier thinks are settled sit under Probably done."
+  },
+  {
     "version": "0.7.14",
     "date": "2026-11-13",
     "title": "Kier AI in Finder and the Dock",
