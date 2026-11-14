@@ -34,7 +34,7 @@ class Security(unittest.TestCase):
                      lock=threading.Lock(), KEY='owner', QUESTIONS={}, state=lambda m: m, last=0,
                      now=lambda: 'fixture', turn=lambda **_: contextlib.nullcontext(), SteppedAside=type('SteppedAside', (Exception,), {}),
                      EMBED=folder, embedder=lambda texts, **_: [[1] for _ in texts], seconds=lambda _: 1,
-                     chat=lambda _: iter([('fixture', None), (None, {})]))
+                     chat=lambda _, began=None: iter([('fixture', None), (None, {})]), failed=lambda: None, worked=lambda: None)
         exec(compile(ast.Module(body=[handler], type_ignores=[]), name, 'exec'), scope)
         return scope['Handler'], scope
     def test_actual_handlers(self):
@@ -77,8 +77,12 @@ class Security(unittest.TestCase):
                     def fail(*_): raise ValueError('PRIVATE_MARKER')
                     scope['chat'] = fail
                     scope['model'] = SimpleNamespace(system_one=fail)
+                    # The language model's handler counts its failures, so a run of them can start it clean.
+                    counted = []
+                    scope['failed'] = lambda: counted.append(1)
                     status, body = request('POST', posts[0][0], json.dumps(posts[0][1]), auth)
                     self.assertGreaterEqual(status, 500); self.assertNotIn(b'PRIVATE_MARKER', body)
+                    if name == 'llm_server.py': self.assertEqual(len(counted), 1)
                 finally:
                     server.shutdown(); server.server_close(); thread.join()
 

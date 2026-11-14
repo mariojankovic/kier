@@ -4,7 +4,7 @@ import { createServer, request } from 'node:http'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { sealBody, signedHeaders, responseMAC } from '../lib/http-auth.mjs'
+import { sealBody, signedHeaders, responseMAC, streamMAC, lineMAC } from '../lib/http-auth.mjs'
 
 const dir = mkdtempSync(join(tmpdir(), 'kier-mail-http-'))
 process.env.KIER_DATA_DIR = dir
@@ -14,7 +14,15 @@ let modelStatus = 200
 const model = createServer(async (req, res) => {
   let body = ''
   for await (const chunk of req) body += chunk
-  seen.push({ path: req.url, body: JSON.parse(body) })
+  const parsed = JSON.parse(body)
+  seen.push({ path: req.url, body: parsed })
+  if (parsed.stream && modelStatus === 200) {
+    // An OpenAI-style server streams its answer as server-sent events, a few words at a time.
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    for (const words of output.match(/\S+\s*/g)) res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: words } }] })}\n\n`)
+    res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
+    return res.end()
+  }
   res.writeHead(modelStatus, { 'content-type': 'application/json' })
   res.end(JSON.stringify({ choices: [{ message: { content: output } }] }))
 })
@@ -150,5 +158,74 @@ test('an unavailable configured model returns a clear signed 503', async () => {
     assert.equal(result.status, 503)
     assert.match(result.body.error, /not ready|setting up|unavailable/i)
     assert.ok(!result.body.error.includes(String(model.address().port)))
+  } finally { modelStatus = 200 }
+})
+
+// A streamed reply as Kier Mail reads it: the status signed up front, then each line checked by its number and MAC,
+// up to the empty closing line.
+function sendStream(input) {
+  const plain = Buffer.from(JSON.stringify(input)), wire = sealBody(secret, plain)
+  const proof = signedHeaders(secret, 'POST', path, wire), nonce = proof['x-kier-nonce']
+  return new Promise((resolve, reject) => {
+    const req = request({ hostname: '127.0.0.1', port, path, method: 'POST', headers: { 'content-type': 'application/json', ...proof } }, res => {
+      const chunks = []
+      res.on('data', chunk => chunks.push(chunk))
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8')
+        if (res.headers['x-kier-stream'] !== 'lines-v1') return resolve({ status: res.statusCode, streamed: false, body: JSON.parse(body) })
+        assert.equal(res.headers['x-kier-response'], streamMAC(secret, nonce, res.statusCode))
+        const frames = body.split('\n').slice(0, -1), lines = []
+        frames.forEach((frame, seq) => {
+          const [n, mac, ...rest] = frame.split(' '), payload = rest.join(' ')
+          assert.equal(Number(n), seq)
+          assert.equal(mac, lineMAC(secret, nonce, seq, Buffer.from(payload)))
+          if (payload) lines.push(JSON.parse(payload))
+        })
+        assert.equal(frames.at(-1).split(' ').slice(2).join(' '), '', 'the reply ends with its closing line')
+        resolve({ status: res.statusCode, streamed: true, lines })
+      })
+    })
+    req.on('error', reject)
+    req.end(wire)
+  })
+}
+
+test('stream: true sends a summary as signed lines as it forms, then the same result', async () => {
+  seen.length = 0
+  output = 'The team agreed to meet next week. A time still needs to be chosen.'
+  const reply = await sendStream({ ...valid('summarize'), stream: true })
+  assert.equal(reply.status, 200)
+  assert.equal(reply.streamed, true)
+  const texts = reply.lines.filter(line => 'text' in line && !line.done).map(line => line.text)
+  assert.ok(texts.length > 3, 'several updates before the end')
+  assert.ok(texts.every((text, i) => i === 0 || text.startsWith(texts[i - 1])), 'each update extends the last')
+  const done = reply.lines.at(-1)
+  assert.equal(done.done, true)
+  assert.equal(done.text, output)
+  assert.equal(seen.at(-1).body.stream, true)
+})
+
+test('stream: true for a reply ends with its context; triage or a bad stream value is a plain 400', async () => {
+  output = 'Yes, next week works. How about Tuesday?'
+  const draft = await sendStream({ ...valid('draft_reply'), stream: true })
+  assert.equal(draft.lines.at(-1).done, true)
+  assert.equal(draft.lines.at(-1).text, output)
+  assert.ok(Array.isArray(draft.lines.at(-1).context))
+  seen.length = 0
+  for (const input of [{ ...valid('triage'), stream: true }, { ...valid('summarize'), stream: 'yes' }]) {
+    const result = await sendStream(input)
+    assert.equal(result.streamed, false)
+    assert.equal(result.status, 400)
+  }
+  assert.equal(seen.length, 0)
+})
+
+test('stream: true when the model is not ready ends the stream with a signed error line', async () => {
+  modelStatus = 503
+  try {
+    const reply = await sendStream({ ...valid('summarize'), stream: true })
+    assert.equal(reply.streamed, true)
+    assert.equal(reply.lines.at(-1).status, 503)
+    assert.equal(typeof reply.lines.at(-1).error, 'string')
   } finally { modelStatus = 200 }
 })

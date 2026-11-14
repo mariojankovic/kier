@@ -5,7 +5,7 @@ has passed, so between bursts this process holds next to nothing. Every request 
 instructions and examples; their state is worked out once and reused, and only a few such prefixes are kept."""
 import contextlib, copy, ctypes, gc, importlib, json, os, sys, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from secure_http import SecureHandler, SecureServer
+from secure_http import REQUEST_SECONDS, SecureHandler, SecureServer
 
 import mlx.core as mx
 from mlx_lm import load, stream_generate
@@ -117,6 +117,7 @@ def unload():
     global model, tokenizer, prefixes, last_tokens
     model = tokenizer = None
     prefixes, last_tokens = [], []
+    pinned.clear()
     gc.collect()
     mx.clear_cache()
     print("unloaded", flush=True)
@@ -203,10 +204,18 @@ class SteppedAside(Exception):
     """Background reading gave way to someone waiting; the daemon asks again on its next pass."""
 
 
-def chat(body):
-    """Yields (text piece, None) as it generates, then (None, stats)."""
+# The worker is ended REQUEST_SECONDS after a request arrives (secure_http.py), which also loses the loaded model and
+# whatever else was waiting. So work that would run into that stops by itself first: an answer being written ends
+# where it is, a prompt still being read or a batch gives up. Counted from when the request came in, queue included.
+LEAVE_BY = REQUEST_SECONDS - 12
+BATCH_LEAVE_BY = REQUEST_SECONDS - 25
+
+
+def chat(body, began=None):
+    """Yields (text piece, None) as it generates, then (None, stats). `began` is when the request came in."""
     global until
     asked = bool(body.get("asked"))
+    late = lambda: began is not None and time.monotonic() - began > LEAVE_BY
 
     # A search queued behind a card being read waited out the whole read: background reading checks between
     # pieces of the prompt and between words of the answer, and stops when someone is waiting.
@@ -225,25 +234,184 @@ def chat(body):
     with mlx_lm_generate.wired_limit(model):
         for i in range(0, len(rest) - 1, PREFILL):
             give_way()
+            if late():
+                raise SteppedAside("out of time before the answer began")
             model(mx.array(rest[i:min(i + PREFILL, len(rest) - 1)])[None], cache=cache)
             mx.eval([c.state for c in cache])
     temp = float(options.get("temperature", 0.7))
     sampler = make_sampler(temp=temp, top_p=float(options.get("top_p", 0.95)), top_k=int(options.get("top_k", 20))) if temp > 0 else make_sampler(temp=0)
-    n_out, t1 = 0, time.monotonic()
+    n_out, t1, cut = 0, time.monotonic(), False
     for r in stream_generate(model, tokenizer, prompt=rest[-1:], max_tokens=int(options.get("num_predict", 1024)) if int(options.get("num_predict", 1024)) > 0 else 1024,
                              sampler=sampler, prompt_cache=cache):
         give_way()
         n_out += 1
         if r.text:
             yield r.text, None
+        if late():
+            # What is written so far goes back, marked as cut short, instead of the worker being ended mid-answer.
+            cut = True
+            break
     keep = seconds(body.get("keep_alive"))
     until = time.monotonic() + keep if keep >= 0 else -1
     yield None, {"total_duration": int((time.monotonic() - t0) * 1e9), "load_duration": load_ns,
-                 "prompt_eval_count": len(tokens), "eval_count": n_out, "eval_duration": int((time.monotonic() - t1) * 1e9)}
+                 "prompt_eval_count": len(tokens), "eval_count": n_out, "eval_duration": int((time.monotonic() - t1) * 1e9),
+                 **({"done_reason": "time"} if cut else {})}
+
+
+pinned = {}  # a form's instructions, read once and kept while the model is loaded: {tokens: cache}
+PINNED = 6
+
+
+def instructions_read(messages, tokens):
+    """A cache already through a form's instructions, and the tokens after them. cache_for only notices a shared
+    start when two such prompts come one after the other; a form's long, unchanging instructions arrive between
+    other requests, so they are kept by what they are instead. None when the prompt has no such start."""
+    system = [m for m in messages if m.get("role") == "system"][:1]
+    if not system or os.environ.get("KIER_NO_PREFIX"):
+        return None
+    text = str(system[0].get("content"))
+    if text not in pinned:
+        # Where the instructions end: where two prompts that differ only in the question start to differ. (The
+        # template won't render instructions on their own.)
+        a, b = (list(tokenizer.apply_chat_template(system + [{"role": "user", "content": q}], add_generation_prompt=True,
+                                                   enable_thinking=False)) for q in ("a", "b"))
+        n = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), 0)
+        if n < MIN_PREFIX:
+            return None
+        while len(pinned) >= PINNED:
+            pinned.pop(next(iter(pinned)))
+        pinned[text] = (a[:n], prefill(a[:n]))
+    head, cache = pinned[text]
+    if len(head) >= len(tokens) or tokens[:len(head)] != head:
+        return None
+    return copy_cache(cache), tokens[len(head):]
+
+
+def fill_form(body, began=None):
+    """A form filled in (form.py) rather than a reply written: the prompt is read and cached as for chat, and the
+    form's own instructions are kept read between requests."""
+    global until
+    import form
+    fields = form.check(body.get("fields"))
+    asked = bool(body.get("asked"))
+
+    def give_way():
+        if not asked and waiting:
+            raise SteppedAside("stepped aside for a question")
+        if began is not None and time.monotonic() - began > LEAVE_BY:
+            raise SteppedAside("out of time")
+
+    t0 = time.monotonic()
+    loaded = ensure_loaded()
+    load_ns = int((time.monotonic() - t0) * 1e9) if loaded else 0
+    tokens = list(tokenizer.apply_chat_template(body["messages"], add_generation_prompt=True, enable_thinking=False))
+    cache, rest = instructions_read(body["messages"], tokens) or cache_for(tokens)
+    with mlx_lm_generate.wired_limit(model):
+        for i in range(0, len(rest) - 1, PREFILL):
+            give_way()
+            model(mx.array(rest[i:min(i + PREFILL, len(rest) - 1)])[None], cache=cache)
+            mx.eval([c.state for c in cache])
+        out = form.fill(model, tokenizer, cache, rest[-1], fields, copy_cache, give_way)
+    keep = seconds(body.get("keep_alive"))
+    until = time.monotonic() + keep if keep >= 0 else -1
+    return {"model": NAME, **out, "done": True, "total_duration": int((time.monotonic() - t0) * 1e9),
+            "load_duration": load_ns, "prompt_eval_count": len(tokens), "prompt_read_count": len(rest)}
+
+
+def sweep_batch(body, began=None):
+    """Pick-one judgements for a batch of prompts (sweep.py). With the model in memory already, it answers from
+    there and how long it stays is left alone. Otherwise the batch goes through one layer at a time and the model
+    is never loaded: reading in the background costs a fifth of the memory.
+
+    "share": "all" is for prompts that are one text asked several ways (the same mail, once per way its first
+    answer could go): everything they have in common is read once, and nothing is kept on disk. Without it the
+    prompts share their instructions, whose state is kept beside the vault for the next batch."""
+    import sweep
+    prompts, lead, choices, more = sweep.check(body)
+    asked = bool(body.get("asked"))
+    together = body.get("share") == "all"
+    t0 = time.monotonic()
+    began = t0 if began is None else began
+
+    def give_way():
+        if not asked and waiting:
+            raise SteppedAside("stepped aside for a question")
+        # A batch that won't finish before the worker is ended stops here, and the daemon reads the usual way.
+        if time.monotonic() - began > BATCH_LEAVE_BY:
+            raise SteppedAside("batch too slow")
+
+    mx.reset_peak_memory()
+    if model is not None:
+        toks, firsts, second = sweep.tokens(tokenizer, prompts, lead, choices, more)
+        lm, inner = sweep.parts(model)
+        # Where each first answer is read: the end, or where the first lead ends when a second one follows.
+        ats = [len(t) - 1 if not second or second[2][k] is None else second[2][k] for k, t in enumerate(toks)]
+        out = []
+        with mlx_lm_generate.wired_limit(model):
+            n = min(sweep.shared(toks), min(ats)) if together else 0
+            head = None
+            for i in range(0, n, PREFILL):
+                give_way()
+                head = head or make_prompt_cache(model)
+                model(mx.array(toks[0][i:min(i + PREFILL, n)])[None], cache=head)
+                mx.eval([c.state for c in head])
+            for k, t in enumerate(toks):
+                give_way()
+                at = ats[k]
+                if head is not None:
+                    cache, rest = copy_cache(head), t[n:]
+                else:
+                    cache, rest = cache_for(t)
+                    if len(t) - len(rest) > at:
+                        cache, rest = make_prompt_cache(model), t
+                upto = at - (len(t) - len(rest))
+                for i in range(0, upto, PREFILL):
+                    model(mx.array(rest[i:min(i + PREFILL, upto)])[None], cache=cache)
+                    mx.eval([c.state for c in cache])
+                hidden = inner(mx.array(rest[upto:])[None], cache=cache)
+                first = sweep.decide(lm, inner, hidden[:, :1, :], firsts, choices)
+                if at != len(t) - 1:
+                    first["more"] = sweep.decide(lm, inner, hidden[:, -1:, :], second[0][k], second[1])
+                out.append(first)
+        stats = {"streamed": False}
+    else:
+        tok = sweep.tokenizer(MODEL)
+        toks, firsts, second = sweep.tokens(tok, prompts, lead, choices, more)
+        out, stats = sweep.cold(MODEL, toks, firsts, choices, copy_cache, give_way, start=0 if together else sweep.instructions(tok, prompts[0]),
+                                store=None if together else os.path.join(os.path.dirname(os.path.abspath(SOCKET)), "first-word-state.safetensors"), second=second)
+        stats["streamed"] = True
+    return {"model": NAME, "results": out, **stats, "done": True, "peak_bytes": mx.get_peak_memory(),
+            "total_duration": int((time.monotonic() - t0) * 1e9)}
 
 
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# One failed call is a slip. Several in a row mean something kept in memory is broken (seen once: every form failed
+# from the moment the graphics processor was overrun, until the process was restarted). So after a few, everything
+# kept goes, the model with it, and the next request starts clean; if that doesn't help, the process ends and the
+# daemon starts a fresh one. Called inside a request's turn, so nothing else is using what it clears.
+failures = 0
+START_CLEAN, START_AGAIN = 3, 6
+
+
+def failed():
+    global failures
+    failures += 1
+    if failures == START_CLEAN:
+        unload()
+        form = sys.modules.get("form")
+        if form is not None:
+            form._masks.clear()
+    elif failures >= START_AGAIN:
+        print('{"code":"SIDECAR_MODEL_BROKEN"}', flush=True)
+        os._exit(71)
+
+
+def worked():
+    global failures
+    failures = 0
 
 
 class Handler(SecureHandler):
@@ -276,9 +444,48 @@ class Handler(SecureHandler):
                 return self.reply(500, {"error": "SIDECAR_MODEL_FAILED"})
         self.reply(200, {"model": "embeddinggemma-2", "embeddings": out})
 
+    def form(self, body):
+        if not body.get("messages"):
+            return self.reply(400, {"error": "no messages"})
+        with turn(asked=bool(body.get("asked"))):
+            try:
+                out = fill_form(body, self.began)
+                worked()
+                self.reply(200, out)
+            except ValueError:
+                self.reply(400, {"error": "SIDECAR_FORM_INVALID"})
+            except SteppedAside:
+                self.reply(503, {"error": "SIDECAR_MODEL_FAILED"})
+            except Exception as e:
+                print('{"code":"SIDECAR_MODEL_FAILED"}', flush=True)
+                failed()
+                # The kind of failure only, never its message: enough to tell out-of-memory from a slip in form.py.
+                self.reply(500, {"error": "SIDECAR_MODEL_FAILED", "kind": type(e).__name__})
+
+    def sweep(self, body):
+        with turn(asked=bool(body.get("asked"))):
+            try:
+                out = sweep_batch(body, self.began)
+                worked()
+                self.reply(200, out)
+            except ValueError:
+                self.reply(400, {"error": "SIDECAR_SWEEP_INVALID"})
+            except SteppedAside:
+                self.reply(503, {"error": "SIDECAR_MODEL_FAILED"})
+            except Exception as e:
+                print('{"code":"SIDECAR_MODEL_FAILED"}', flush=True)
+                # A model laid out another way is a fact about the model, not a failure of this process.
+                if type(e).__name__ != "Unsupported":
+                    failed()
+                self.reply(501 if type(e).__name__ == "Unsupported" else 500, {"error": "SIDECAR_MODEL_FAILED", "kind": type(e).__name__})
+
     def post(self):
         if self.path == "/api/embed":
             return self.embed(self.body)
+        if self.path == "/api/form" and MODEL != "-":
+            return self.form(self.body)
+        if self.path == "/api/sweep" and MODEL != "-":
+            return self.sweep(self.body)
         if self.path != "/api/chat" or MODEL == "-":
             return self.reply(404, {"error": "not found"})
         body = self.body
@@ -297,23 +504,28 @@ class Handler(SecureHandler):
                         data = (json.dumps(obj) + "\n").encode()
                         self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
                         self.wfile.flush()
-                    for piece, stats in chat(body):
+                    for piece, stats in chat(body, self.began):
                         if piece is not None:
                             send({"model": NAME, "created_at": now(), "message": {"role": "assistant", "content": piece}, "done": False})
                         else:
                             send({"model": NAME, "created_at": now(), "message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop", **stats})
+                    worked()
                     self.wfile.write(b"0\r\n\r\n")
                     return
                 text, stats = "", {}
-                for piece, s in chat(body):
+                for piece, s in chat(body, self.began):
                     if piece is not None:
                         text += piece
                     else:
                         stats = s
+                worked()
                 self.reply(200, {"model": NAME, "created_at": now(), "message": {"role": "assistant", "content": text}, "done": True, "done_reason": "stop", **stats})
             except Exception as e:
                 if not isinstance(e, SteppedAside):
                     print('{"code":"SIDECAR_MODEL_FAILED"}', flush=True)
+                    # Whoever asked going away mid-answer says nothing about the model.
+                    if not isinstance(e, ConnectionError):
+                        failed()
                 try:
                     if started:
                         # Mid-stream the status is already sent: the error goes as the last line, as Ollama does.

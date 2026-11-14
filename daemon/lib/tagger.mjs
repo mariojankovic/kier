@@ -1,6 +1,7 @@
 import { evidenceLine, evidenceMeta, evidenceRecord, evidenceTrust, EVIDENCE_RULE, untrustedBlock } from './evidence-trust.mjs'
 import { parseModelJSON } from './errors.mjs'
 import { modelFetch } from './model-provider.mjs'
+import { sweepChoices } from './form.mjs'
 import { groundedTitle } from './title-grounding.mjs'
 import { actionTitle, ownerVerdict } from './owner-action.mjs'
 // A local model reads each new message once and notes whether the owner has something to do.
@@ -8,7 +9,7 @@ import { actionTitle, ownerVerdict } from './owner-action.mjs'
 // The worked examples are invented.
 import { discordCopy, discordMessage, reconcileDiscordCopies } from './discord-copies.mjs'
 import { config } from './config.mjs'
-import { P, calmed, speaks, wordRegex } from './lang.mjs'
+import { ASK_VERBS, P, calmed, speaks, wordRegex } from './lang.mjs'
 import { names, slice } from './profile.mjs'
 import { handles } from '../collectors/screenchats.mjs'
 import { resolveDue } from './dates.mjs'
@@ -352,6 +353,58 @@ export function parse(raw, item) {
   }, item)
 }
 
+// Every answer the model writes begins {"is_task": and then true or false, so whether an item is a task is decided by
+// the first word after that. For "false", what the rest of the answer is for depends on whose message it is:
+//   incoming: nothing. A non-task from someone else keeps no summary.
+//   the owner's own: its summary, and only when that reads "<owner> asks Filip to …", which is what Waiting on others
+//     is made from (tasks.mjs). So the same pass is read at a second place: with the answer carried on to where the
+//     summary has begun with the owner's name, how much of what the model expects next is one of those verbs.
+// Both are asked of a whole batch in one pass through the model (form.mjs sweepChoices), which needs no model in
+// memory. Only a sure "false" is taken, and for the owner's own only when it is also sure not to be asking anyone;
+// everything else gets the full reading as before. Measured on research/sweep-bench.
+export const FIRST_WORD = 'first-word'
+export const FIRST_NO = 0.9
+export const OWN_ASKS = 0.05
+const FIRST = { lead: '{"is_task":', choices: ['true', 'false'] }
+// The rest of a "false" answer up to the owner's name at the start of its summary, as ans() above writes it.
+const OWN_MORE = { lead: `false,"when":"","due":"","amount":"","urgency":0,"summary":"${JSON.stringify(N).slice(1, -1)}`, choices: ASK_VERBS.map((v) => ` ${v}`) }
+const FIRST_BATCH = 12
+
+// The items that would get a full reading, each with the prompt it would be read with and whether the owner wrote it.
+export function firstPrompts(db, items) {
+  const asked = []
+  for (const item of items) {
+    if (discordCopy(db, item)) continue
+    const burst = burstOf(db, item)
+    if (!burst.last) continue
+    const group = (() => { try { return JSON.parse(item.meta || '{}').group } catch { return false } })()
+    const whole = { ...item, text: burst.read ?? burst.text ?? '', talk: group ? talkers(db, burst.start) : '' }
+    if (whole.text.trim().length < 3) continue
+    asked.push({ id: item.id, mine: !!item.from_me, prompt: messages(whole, contextForTag(db, burst.start, burst.text), burst.after) })
+  }
+  return asked
+}
+
+// What a batch's results settle: the owner's own need both answers.
+export const settles = (result, mine) => result?.options?.false >= FIRST_NO && result.covered >= 0.9 && (!mine || result.more?.covered <= OWN_ASKS)
+
+// item id -> the exact prompt that was settled as "not a task, nothing to keep". The loop that follows compares
+// prompts, so an item whose chat moved on in between is simply read in full.
+export async function firstWords(db, items, sweep = sweepChoices) {
+  const sure = new Map()
+  if (config.firstWord === false) return sure
+  const asked = firstPrompts(db, items)
+  for (let i = 0; i < asked.length; i += FIRST_BATCH) {
+    const part = asked.slice(i, i + FIRST_BATCH)
+    const own = part.flatMap((a, k) => (a.mine ? [k] : []))
+    const out = await sweep({ prompts: part.map((a) => a.prompt), ...FIRST, ...(own.length && { more: { ...OWN_MORE, for: own } }) }).catch(() => null)
+    // No forms here, or the batch gave way to a question: these and the rest are read the usual way.
+    if (!out) break
+    out.results.forEach((r, k) => { if (settles(r, part[k].mine)) sure.set(part[k].id, JSON.stringify(part[k].prompt)) })
+  }
+  return sure
+}
+
 export function pending(db, limit) {
   const marks = TAGGED_SOURCES.map(() => '?').join(', ')
   return db.prepare(`select i.* from items i left join tags t on t.item_id = i.id
@@ -373,7 +426,7 @@ export function excludeReminderNotices(db) {
       and s.status in ('open', 'snoozed', 'done', 'dismissed'))`).run().changes)
 }
 
-export async function tagPending(db, { limit = 25 } = {}) {
+export async function tagPending(db, { limit = 25, sweep = sweepChoices } = {}) {
   reconcileDiscordCopies(db)
   const items = pending(db, limit)
   // Quiet moments go to double checking tasks found earlier.
@@ -388,32 +441,34 @@ export async function tagPending(db, { limit = 25 } = {}) {
   // tagged once: a copy of one already tagged isn't, so a task marked done can't come back as new.
   const copy = db.prepare(`select 1 from items i join tags t on t.item_id = i.id where i.source = ? and coalesce(i.thread, '') = ?
     and i.ts between ? and ? and i.text = ? and i.id != ? limit 1`)
-  for (const item of items) {
+  const read = async (item, first) => {
     if (discordCopy(db, item)) {
       save.run({ item_id: item.id, ...none, summary: '', model: 'twin', tagged_at: now(), said: null })
       tagged++
-      continue
+      return
     }
     if (copy.get(item.source, item.thread ?? '', item.ts - 60, item.ts + 60, item.text ?? '', item.id)) {
       save.run({ item_id: item.id, ...none, summary: '', model: 'twin', tagged_at: now(), said: null })
       tagged++
-      continue
+      return
     }
     const burst = burstOf(db, item)
     // The burst is tagged once, on its last message, with all of it.
     if (!burst.last) {
       save.run({ item_id: item.id, ...none, summary: '', model: 'burst', tagged_at: now(), said: null })
       tagged++
-      continue
+      return
     }
     const group = (() => { try { return JSON.parse(item.meta || '{}').group } catch { return false } })()
     const whole = { ...item, text: burst.read ?? burst.text ?? '', talk: group ? talkers(db, burst.start) : '' }
     // Two letter replies ("ok", "da") are never tasks; no need to wake the model.
     const short = whole.text.trim().length < 3
     const context = contextForTag(db, burst.start, burst.text)
-    let t = short ? { ...none, summary: whole.text } : await tag(whole, context, burst.after).catch(() => null)
-    if (!t) { failed++; continue }
-    let model = short ? 'skip' : config.model
+    // Already settled as "not a task, nothing to keep" for this very prompt: nothing more to write.
+    const settled = !short && first?.get(item.id) === JSON.stringify(messages(whole, context, burst.after))
+    let t = short ? { ...none, summary: whole.text } : settled ? { ...none, summary: '' } : await tag(whole, context, burst.after).catch(() => null)
+    if (!t) { failed++; return }
+    let model = short ? 'skip' : settled ? FIRST_WORD : config.model
     // A balance notice isn't a bill: "saldo pretplate je 7 EUR" is what's left, not what's owed.
     // Checked after the model, since telling the model so made it shy of every notice.
     if (t.is_task && BALANCE.test(burst.text) && !OWED.test(burst.text)) { t = { ...t, is_task: 0 }; model = 'balance' }
@@ -467,7 +522,7 @@ export async function tagPending(db, { limit = 25 } = {}) {
       const who = String(r?.who || '').trim(), what = String(r?.what || '').trim().replace(/^to\s+/i, '')
       // A failed or incomplete ownership check must be retried, never accepted as a promise.
       const verdict = ownVerdict(r, whole.text)
-      if (verdict === null) { failed++; continue }
+      if (verdict === null) { failed++; return }
       if (!verdict) {
         t = { ...t, is_task: 0, urgency: 0, summary: who && what ? `${N} asks ${who} to ${what}` : t.summary }
         model = 'own'
@@ -498,6 +553,8 @@ export async function tagPending(db, { limit = 25 } = {}) {
     if (relay) db.prepare("update tags set card = 'todo' where item_id = ?").run(item.id)
     tagged++
   }
+  const first = await firstWords(db, items, sweep)
+  for (const item of items) await read(item, first)
   return { tagged, failed, ...(await doubleCheck(db)) }
 }
 

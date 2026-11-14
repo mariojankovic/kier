@@ -1,5 +1,6 @@
 import { evidenceLine, untrustedBlock, EVIDENCE_RULE, briefEvidence } from './evidence-trust.mjs'
 import { ASK_DETAILS, createReminder, modelReminder, reminderIntent, reminderRequest } from './create-reminder.mjs'
+import { command, DOES, SAME, STATE, TO } from './command.mjs'
 import { CODEX_UNAVAILABLE } from './ask-isolation.mjs'
 import { authorization, readScope, localAuthorization } from './authorization.mjs'
 import { parseModelJSON } from './errors.mjs'
@@ -107,11 +108,7 @@ function daysAsked(q) {
   if (weekday >= 0) return [at((weekday - wd + 7) % 7), at((weekday - wd + 7) % 7)]
   return null
 }
-const TO = {
-  open: 'Put back on your list', done: 'Mark done', snoozed: 'Remind me tomorrow', dismissed: 'Not mine',
-}
-const STATE = { open: 'on the list', overdue: 'on the list, overdue', done: 'marked done', handled: 'ticked off by Kier', dismissed: 'marked not yours', snoozed: 'snoozed', expired: 'past' }
-const ACT = `${config.me} asked Kier to change something on ${P.his} list. Below are the tasks that may be meant, numbered, each with where it's from and its state now. Which does ${P.he} want changed, and to what: "open" (back on the list, not done), "done", "snoozed" (tomorrow) or "dismissed" (not ${P.his})? Only tasks the request clearly means, usually one; none if it's unclear. Reply with only JSON: {"actions": [{"n": 1, "to": "open"}]}`
+const ACT =`${config.me} asked Kier to change something on ${P.his} list. Below are the tasks that may be meant, numbered, each with where it's from and its state now. Which does ${P.he} want changed, and to what: "open" (back on the list, not done), "done", "snoozed" (tomorrow) or "dismissed" (not ${P.his})? Only tasks the request clearly means, usually one; none if it's unclear. Reply with only JSON: {"actions": [{"n": 1, "to": "open"}]}`
 
 async function actionsFor(db, q, found, item) {
   const ids = new Set(found.map((m) => m.id))
@@ -135,14 +132,13 @@ async function actionsFor(db, q, found, item) {
   })
   if (!res.ok) return []
   const out = parseModelJSON((await res.json()).message.content.match(/\{[\s\S]*\}/)?.[0] ?? '{}')
-  const same = { open: ['open', 'overdue'], done: ['done', 'handled'], snoozed: ['snoozed'], dismissed: ['dismissed'] }
   return (out.actions || []).map((a) => ({ t: candidates[Number(a.n) - 1], to: a.to }))
-    .filter((a) => a.t && TO[a.to] && !same[a.to].includes(a.t.state))
+    .filter((a) => a.t && TO[a.to] && !SAME[a.to].includes(a.t.state))
     .slice(0, 3).map((a) => ({ id: a.t.id, status: a.to, label: TO[a.to], summary: a.t.summary || '', state: a.t.state }))
 }
 
 // Supply earlier turns as background rather than authoritative model answers.
-async function local(q, history = [], about = '', on = QUIET, item = null) {
+async function local(q, history = [], about = '', on = QUIET, item = null, acting = true) {
   const earlier = history.length
     ? `\n\nEarlier in this chat (background only):\n${history.map(turn).join('\n')}`
     : ''
@@ -158,13 +154,12 @@ async function local(q, history = [], about = '', on = QUIET, item = null) {
   const days = daysAsked(q) || (history.length ? daysAsked(history.at(-1).q) : null)
   if (!about && !found.length) on.status(plans ? 'Looking at your calendar and list' : 'Reading your brief')
   let offered = []
-  if (ACTING.test(q)) {
+  if (acting && ACTING.test(q)) {
     on.status('Finding what to change')
     offered = await actionsFor(globalThis.kierDb, q, found, item).catch(() => [])
   }
   // Describe the evidence and available action consistently with the button shown.
   if (offered.length) {
-    const DOES = { open: 'puts it back on your list', done: 'marks it done', snoozed: 'moves it to tomorrow', dismissed: 'takes it off as not yours' }
     const out = offered.length === 1
       ? `Found it: “${offered[0].summary.replace(/[.!]$/, '')}”, ${STATE[offered[0].state] || offered[0].state}. The button below ${DOES[offered[0].status]}.`
       : `Found ${offered.length}: ${offered.map((o) => `“${o.summary}”`).join(' and ')}. The buttons below do it.`
@@ -274,7 +269,24 @@ export async function ask(db, q, agent = 'kier', history = [], item = null, on =
   // A reply to "what should I remind you about?" is the reminder itself.
   const answering = !item && history.at(-1)?.a === ASK_DETAILS
   let request = !item && (reminderRequest(q) || (answering && reminderRequest(`remind me to ${q}`)))
-  if (!request && !item && (answering || reminderIntent(q))) {
+  // What was typed, read as one action by Kier's own model (command.mjs), when the exact phrasings above didn't
+  // match. Sure of itself, it settles the question here; unsure, or with the owner's own model server, it is null
+  // and everything below runs as it always did. A question for Claude only pays for this when it looks like a command.
+  const began = Date.now()
+  let typed = null
+  if (!request && !answering && !(item && renameTo(q)) && config.typedCommands !== false && (agent === 'kier' || reminderIntent(q) || ACTING.test(q) || RENAME.test(q))) {
+    on.status?.('Reading what you asked')
+    typed = await command(db, q, { item }).catch(() => null)
+    // In a card's own chat a reminder is about that card, which the paths below handle.
+    if (item && ['remind', 'details'].includes(typed?.kind)) typed = null
+  }
+  if (typed?.kind === 'remind') request = typed.request
+  if (typed?.kind === 'details') { on.text?.(ASK_DETAILS); return { agent, seconds: 0, out: ASK_DETAILS } }
+  if (typed?.kind === 'offer' || typed?.kind === 'say') {
+    on.text?.(typed.out)
+    return { agent, seconds: Math.round((Date.now() - began) / 1000), out: typed.out, ...(typed.actions && { actions: typed.actions }) }
+  }
+  if (!request && !typed && !item && (answering || reminderIntent(q))) {
     const found = await modelReminder(answering ? `remind me to ${q}` : q, modelFetch, config.model).catch(() => null)
     if (found?.needsDetails) { on.text?.(ASK_DETAILS); return { agent, seconds: 0, out: ASK_DETAILS } }
     if (found) request = found
@@ -290,8 +302,9 @@ export async function ask(db, q, agent = 'kier', history = [], item = null, on =
   globalThis.kierDb = readScope(db, localAuthorization())
   const t0 = Date.now()
   // Handle an explicit rename in a card’s chat directly, regardless of the selected assistant.
-  const title = item && renameTo(q)
-  if (title && db.prepare('update tags set summary = ? where item_id = ?').run(title, item).changes) {
+  const renamed = typed?.kind === 'rename' ? typed : item && renameTo(q) ? { id: item, title: renameTo(q) } : null
+  const title = renamed?.title
+  if (title && db.prepare('update tags set summary = ? where item_id = ?').run(title, renamed.id).changes) {
     const out = `Renamed it to “${title}”.`
     on.text?.(out)
     return { agent, seconds: Math.round((Date.now() - t0) / 1000), out }
@@ -303,6 +316,7 @@ export async function ask(db, q, agent = 'kier', history = [], item = null, on =
   const prompt = (agent === 'claude' && CLAUDE) || (agent === 'codex' && CODEX) ? intro(q, history, about) : null
   if (prompt) sent(db, 'chat', agent, prompt)
   if (agent === 'claude' && CLAUDE) r = await claude(prompt, on)
-  else r = await local(q, history, about, on, item)
+  // Read as a plain question above: the older guess at "is this asking for a change" doesn't get a second go.
+  else r = await local(q, history, about, on, item, typed?.kind !== 'answer')
   return { agent, seconds: Math.round((Date.now() - t0) / 1000), ...r }
 }

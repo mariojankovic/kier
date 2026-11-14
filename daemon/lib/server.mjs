@@ -23,7 +23,9 @@ import { redact } from './redact.mjs'
 import { act, steps } from './setup.mjs'
 import { diagnostics } from './diagnostics.mjs'
 import { ask, agents, CLAUDE } from './ask.mjs'
-import { mailAssist, MAIL_ASSIST_MAX_BYTES } from './mail-assist.mjs'
+import { mailAssist, validateMailAssist, MAIL_ASSIST_MAX_BYTES } from './mail-assist.mjs'
+import { auditAssist, AUDIT_ASSIST_MAX_BYTES } from './audit-assist.mjs'
+import { mailQuery, MAIL_QUERY_MAX_BYTES } from './mail-query.mjs'
 import { eventInfo } from './headsup.mjs'
 import { say, speak, speaking, stop } from './speak.mjs'
 import { handoff, reopen, start as startSession, warm as warmHandoffs } from './handoff.mjs'
@@ -146,7 +148,7 @@ export function serve(db, { install, port = config.port } = {}) {
       let requestBody
       try { requestBody = nonce && wire.length ? openBody(secret, wire).toString('utf8') : wire.toString('utf8') }
       catch (error) {
-        if (url.pathname === '/api/mail-assist') return json(res, { error: 'Invalid encrypted request body.' }, 400)
+        if (['/api/mail-assist', '/api/audit-assist', '/api/mail-query'].includes(url.pathname)) return json(res, { error: 'Invalid encrypted request body.' }, 400)
         throw error
       }
       const q = Object.fromEntries(url.searchParams)
@@ -173,7 +175,52 @@ export function serve(db, { install, port = config.port } = {}) {
         let input
         try { input = JSON.parse(requestBody) }
         catch { return json(res, { error: 'Invalid mail assist JSON.' }, 400) }
+        const failure = error => {
+          const status = [400, 413, 503].includes(error.status) ? error.status : 503
+          return { status, error: error.status === status ? error.message : 'Kier\'s model is not ready. Try again shortly.' }
+        }
+        // "stream": true (summaries and replies): the text as it forms, one signed line each ({text} so far), then
+        // {done, ...result}, or {error, status} if the model stops partway. Without it, one JSON reply as before.
+        if (input?.stream === true) {
+          try { validateMailAssist(input) } catch (error) { const f = failure(error); return json(res, { error: f.error }, f.status) }
+          res.streamLines?.()
+          res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-cache' })
+          const send = line => res.write(`${JSON.stringify(line)}\n`)
+          try { send({ done: true, ...await mailAssist(db, input, { onText: text => send({ text }) }) }) }
+          catch (error) { send(failure(error)) }
+          return res.end()
+        }
         try { return json(res, await mailAssist(db, input)) }
+        catch (error) { const f = failure(error); return json(res, { error: f.error }, f.status) }
+      }
+      // A search typed into Kier Mail, read into filters (mail-query.mjs). Native and signed only. With nothing to add
+      // to Kier Mail's own reading the answer is an empty 204, and Kier Mail keeps its own.
+      if (url.pathname === '/api/mail-query') {
+        if (!nonce) return json(res, { error: 'authentication required' }, 401)
+        if (req.method !== 'POST') return json(res, { error: 'Mail query requires POST.' }, 400)
+        if (Buffer.byteLength(requestBody, 'utf8') > MAIL_QUERY_MAX_BYTES) return json(res, { error: 'Mail query request is too large.' }, 413)
+        let input
+        try { input = JSON.parse(requestBody) }
+        catch { return json(res, { error: 'Invalid mail query JSON.' }, 400) }
+        try {
+          const answer = await mailQuery(db, input)
+          if (answer) return json(res, answer)
+          res.writeHead(204)
+          return res.end()
+        } catch (error) {
+          const status = [400, 413].includes(error.status) ? error.status : 503
+          return json(res, { error: error.status === status ? error.message : 'Kier could not read this search.' }, status)
+        }
+      }
+      // Kier Audit's cleanup advice. Native and signed only, like mail-assist: a browser page never reaches it.
+      if (url.pathname === '/api/audit-assist') {
+        if (!nonce) return json(res, { error: 'authentication required' }, 401)
+        if (req.method !== 'POST') return json(res, { error: 'Audit assist requires POST.' }, 400)
+        if (Buffer.byteLength(requestBody, 'utf8') > AUDIT_ASSIST_MAX_BYTES) return json(res, { error: 'Audit assist request is too large.' }, 413)
+        let input
+        try { input = JSON.parse(requestBody) }
+        catch { return json(res, { error: 'Invalid audit assist JSON.' }, 400) }
+        try { return json(res, await auditAssist(input)) }
         catch (error) {
           const status = [400, 413, 503].includes(error.status) ? error.status : 503
           return json(res, { error: error.status === status ? error.message : 'Kier\'s model is not ready. Try again shortly.' }, status)

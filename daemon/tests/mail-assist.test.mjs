@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 const dir = mkdtempSync(join(tmpdir(), 'kier-mail-assist-'))
 process.env.KIER_DATA_DIR = dir
 writeFileSync(join(dir, 'config.json'), JSON.stringify({ me: 'Sam', fullName: 'Sam', about: 'Builds useful software.', online: false, off: [] }))
-const { mailAssist, validateMailAssist, parseTriage, MAIL_ASSIST_MAX_BYTES } = await import('../lib/mail-assist.mjs')
+const { mailAssist, validateMailAssist, parseTriage, sortInOnePass, MAIL_ASSIST_MAX_BYTES } = await import('../lib/mail-assist.mjs')
 const { open, addItems, now } = await import('../lib/db.mjs')
 const { config } = await import('../lib/config.mjs')
 const { setSource } = await import('../lib/settings.mjs')
@@ -246,4 +246,104 @@ test('triage with alert says who wrote and whether the mail is worth an alert', 
   assert.deepEqual(plain, { bundle: 'people', important: false, seconds: 0 })
   assert.throws(() => validateMailAssist({ ...request('summarize'), alert: true }), rejectsStatus(400))
   assert.throws(() => validateMailAssist({ ...request('triage'), alert: 'yes' }), rejectsStatus(400))
+})
+
+// A model that streams its answer as Ollama-style NDJSON, split into the given chunks (lines may break mid-way).
+function streamingModel(pieces, calls = [], { failAt } = {}) {
+  return async (path, options) => {
+    calls.push({ path, ...options, body: JSON.parse(options.body) })
+    const lines = pieces.map((content, i) => JSON.stringify(i === failAt ? { error: 'model stopped' } : { message: { content } }) + '\n').join('')
+    const bytes = new TextEncoder().encode(lines)
+    const body = (async function* () { for (let i = 0; i < bytes.length; i += 7) yield bytes.slice(i, i + 7) })()
+    return { ok: true, body }
+  }
+}
+
+test('mail-assist streams a summary as it forms and ends with the same result', async t => {
+  const db = database(t), calls = [], seen = []
+  const result = await mailAssist(db, { ...request(), stream: true }, { fetchModel: streamingModel(['They want ', 'to sign ', 'next week — Friday.'], calls), clock: () => 0, onText: text => seen.push(text) })
+  assert.equal(calls[0].body.stream, true)
+  assert.deepEqual(seen, ['They want', 'They want to sign', 'They want to sign next week - Friday.'])
+  assert.deepEqual(result, { text: 'They want to sign next week - Friday.', seconds: 0 })
+  const plainResult = await mailAssist(db, request(), { fetchModel: model('They want to sign next week — Friday.'), clock: () => 0 })
+  assert.deepEqual(plainResult, result, 'the streamed result matches the one-shot result')
+})
+
+test('mail-assist stream leaves out thinking while it is being written', async t => {
+  const db = database(t), seen = []
+  await mailAssist(db, { ...request(), stream: true }, { fetchModel: streamingModel(['<think>Private', ' reasoning</think>', 'Visible answer.']), clock: () => 0, onText: text => seen.push(text) })
+  assert.ok(seen.every(text => !/Private|reasoning|think/.test(text)), 'no thinking reaches the screen')
+  assert.equal(seen.at(-1), 'Visible answer.')
+})
+
+test('mail-assist stream that stops partway fails like a model that is not ready', async t => {
+  const db = database(t), seen = []
+  await assert.rejects(mailAssist(db, { ...request('draft_reply'), stream: true }, { fetchModel: streamingModel(['Next week ', 'works.'], [], { failAt: 1 }), clock: () => 0, onText: text => seen.push(text) }), rejectsStatus(503))
+  assert.deepEqual(seen, ['Next week'])
+})
+
+test('mail-assist stream is for summaries and replies; triage and bad values are refused', () => {
+  assert.equal(validateMailAssist({ ...request(), stream: true }).stream, true)
+  assert.equal(validateMailAssist(request()).stream, undefined)
+  assert.throws(() => validateMailAssist({ ...request('triage'), stream: true }), rejectsStatus(400))
+  assert.throws(() => validateMailAssist({ ...request(), stream: 'yes' }), rejectsStatus(400))
+})
+
+// The pass sorting is read from: the bundle's share at the first place, importance after each bundle at the second.
+const BUNDLES = ['people', 'updates', 'promos', 'social', 'finance', 'purchases', 'travel', 'forums', 'low']
+function pass({ bundle = 'purchases', important = {}, begins = 0.98, then = 0.97, calls = [] } = {}) {
+  return async ask => {
+    calls.push(ask)
+    const options = Object.fromEntries(BUNDLES.map(name => [name, name === bundle ? 0.9 : 0.1 / 8]))
+    return { streamed: true, results: BUNDLES.map(name => ({ options, covered: begins,
+      more: { options: important[name] ? { true: 0.8, false: 0.2 } : { true: 0.05, false: 0.95 }, covered: then } })) }
+  }
+}
+
+test('sorting is read in one pass, with the importance that follows the chosen bundle and no written answer', async () => {
+  const calls = []
+  const noModel = () => assert.fail('wrote an answer')
+  const out = await mailAssist(null, request('triage'), { sweep: pass({ calls }), fetchModel: noModel, clock: () => 0 })
+  assert.deepEqual(out, { bundle: 'purchases', important: false, seconds: 0 })
+  const [ask] = calls
+  assert.equal(calls.length, 1)
+  assert.equal(ask.prompts.length, 9)
+  assert.ok(ask.prompts.every(prompt => prompt === ask.prompts[0]), 'the same request, once per bundle')
+  assert.match(ask.prompts[0][0].content, /Classify the thread/)
+  assert.match(ask.prompts[0][1].content, /Can we sign the contract next week/)
+  assert.equal(ask.lead, '{"bundle":"')
+  assert.deepEqual(ask.choices, BUNDLES)
+  assert.equal(ask.share, 'all')
+  assert.deepEqual(ask.more, { leads: BUNDLES.map(name => `${name}","important":`), choices: ['true', 'false'], for: [0, 1, 2, 3, 4, 5, 6, 7, 8] })
+  // Importance is the one that follows the bundle the model chose, not another bundle's.
+  assert.equal((await mailAssist(null, request('triage'), { sweep: pass({ bundle: 'finance', important: { finance: true } }), fetchModel: noModel })).important, true)
+  assert.equal((await mailAssist(null, request('triage'), { sweep: pass({ bundle: 'finance', important: { people: true } }), fetchModel: noModel })).important, false)
+  assert.deepEqual(await sortInOnePass([], pass({ bundle: 'low' })), { bundle: 'low', important: false })
+})
+
+test('a pass that fails or starts some other way asks the old way; a slow one fails rather than load the model', async () => {
+  const written = '{"bundle":"travel","important":true}'
+  for (const sweep of [async () => null, async () => { throw Error('no') }, pass({ begins: 0.3 }), pass({ then: 0.2 }), async () => ({ results: [] })]) {
+    const calls = []
+    const out = await mailAssist(null, request('triage'), { sweep, fetchModel: model(written, calls), clock: () => 0 })
+    assert.deepEqual(out, { bundle: 'travel', important: true, seconds: 0 })
+    assert.equal(calls.length, 1)
+  }
+  let at = 0
+  await assert.rejects(mailAssist(null, request('triage'), { sweep: async () => { at = 16_000; return null }, fetchModel: () => assert.fail('loaded the model'), clock: () => at }), rejectsStatus(503))
+  config.firstWord = false
+  try {
+    const out = await mailAssist(null, request('triage'), { sweep: () => assert.fail('asked in one pass'), fetchModel: model(written), clock: () => 0 })
+    assert.equal(out.bundle, 'travel')
+  } finally { config.firstWord = true }
+  // Only sorting is read this way.
+  const summary = await mailAssist(null, request('summarize'), { sweep: () => assert.fail('asked in one pass'), fetchModel: model('A short summary.') })
+  assert.equal(summary.text, 'A short summary.')
+})
+
+test('sorting in one pass still says who wrote and whether to alert', async t => {
+  const db = database(t)
+  const contacts = address => ({ known: address === 'priya@example.test' })
+  const out = await mailAssist(db, { ...request('triage'), alert: true }, { sweep: pass({ bundle: 'people' }), fetchModel: () => assert.fail('wrote an answer'), clock: () => 0, lookup: contacts })
+  assert.deepEqual(out, { bundle: 'people', important: false, person: 'known', notify: true, seconds: 0 })
 })

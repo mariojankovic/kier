@@ -53,12 +53,20 @@ function dayFor(clock, at) {
 const CROATIAN = /[čćšžđ]|\b(?:sutra|danas|prekosutra|ponedjelj|utor|srijed|petak|petku|subot|nedjelj|ujutro|nave[cč]er)/i
 const at_ = (words, clock) => (CROATIAN.test(words) ? ` u ${clock}` : ` at ${clock}`)
 
+// "Remind me what Nika said": the words after "remind me" ask for something to be told, not kept.
+const ASKING = /^(what|who|why|how|where|whether|if|when|after|kad|kada|što|sta|kaj|tko|gdje)\b/i
+export function reminderQuestion(question) {
+  const q = String(question).trim().replace(/^mo[žz]e[šs](?: li)? me podsjetiti\s+/i, 'podsjeti me ')
+  const prefix = q.match(REQUEST)
+  return !!prefix && ASKING.test(q.slice(prefix[0].length).trim())
+}
+
 export function reminderRequest(question, at = now()) {
   const q = String(question).trim().replace(/^mo[žz]e[šs](?: li)? me podsjetiti\s+/i, 'podsjeti me ')
   const prefix = q.match(REQUEST)
   if (!prefix) return null
   let title = q.slice(prefix[0].length).replace(/[?!,]+$/, '').trim()
-  if (!title || REFERENCE.test(title) || /\b(?:mark|snooze|reopen|dismiss)\b.*\b(?:card|task|reminder)\b/i.test(title) || /^(what|who|why|how|where|whether|if|when|after|kad|kada|što|sta|kaj|tko|gdje)\b/i.test(title)) return null
+  if (!title || REFERENCE.test(title) || /\b(?:mark|snooze|reopen|dismiss)\b.*\b(?:card|task|reminder)\b/i.test(title) || ASKING.test(title)) return null
   const dates = [...title.matchAll(DATE)]
   // A bare time ("at 18:30") is not a day: the time logic below picks today or tomorrow.
   const date = dates.find(m => !/^\s*(?:(?:at|@|by|around|u|oko|do)\s*)?\d/i.test(m[0]) && resolveDue(m[0], '', at, title, DATES))
@@ -112,9 +120,15 @@ export async function modelReminder(q, fetchModel, model, at = now()) {
   let out
   try { out = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) } catch { return null }
   if (out?.create !== true) return null
-  const title = String(out.title || '').replace(/\s+/g, ' ').trim().replace(/[,.:;!?]+$/, '').slice(0, 140)
+  return reminderFrom(out.title, out.when, q, at)
+}
+
+// A title and date words the model took from the owner's request, made into a reminder: the day and time are worked
+// out here, never by the model.
+export function reminderFrom(rawTitle, rawWhen, q, at = now()) {
+  const title = String(rawTitle || '').replace(/\s+/g, ' ').trim().replace(/[,.:;!?]+$/, '').slice(0, 140)
   if (!title) return { needsDetails: true }
-  const when = String(out.when || '').trim()
+  const when = String(rawWhen || '').trim()
   const timedTitle = takeTime(title, at)
   const due = when ? resolveDue(when, '', at, `${title} ${when}`, DATES) : ''
   const timed = takeTime(when, at, due || localDay(at))

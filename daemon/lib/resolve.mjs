@@ -250,16 +250,21 @@ If it was never a real task at all, set not_a_task true: an example someone gave
 First say in your own words what the task really is, from the chat. Then judge. Reply with only JSON:
 {"task": "the real task in at most 12 words", "done": true or false, "not_mine": true or false, "not_a_task": true or false, "line": number of the line that shows it or 0, "why": "at most 12 words"}`
 
-export async function judge(db, task, lines) {
+// What the done-check is shown: its instructions, then the task, the chat before it and the numbered lines after it.
+export function judgeMessages(db, task, lines) {
   const before = NO_CHAT.has(task.source) ? [] : contextFor(db, burstOf(db, task).start, BEFORE)
   const user = untrustedBlock({ summaryGuess: task.summary, task: evidenceRecord(task),
     before: before.map(c => ({ ...c.trust, sender: c.from, time: c.time, text: c.text })),
     after: lines.map((l, i) => ({ number: i + 1, ...(l.record || evidenceRecord({ source: l.kind || 'unknown', from_me: 0 }, l.line)) })) })
+  return [{ role: 'system', content: SYSTEM + '\n' + EVIDENCE_RULE }, { role: 'user', content: user }]
+}
+
+export async function judge(db, task, lines) {
   // Room for pull request descriptions on the commit lines.
   const res = await modelFetch('/api/chat', {
     method: 'POST', signal: AbortSignal.timeout(120000),
     body: JSON.stringify({ model: config.model, stream: false, think: false, keep_alive: config.keepAlive, options: { temperature: 0, num_ctx: 8192 },
-      messages: [{ role: 'system', content: SYSTEM + '\n' + EVIDENCE_RULE }, { role: 'user', content: user }] }),
+      messages: judgeMessages(db, task, lines) }),
   })
   if (!res.ok) throw Error(`ollama ${res.status}`)
   const out = parseModelJSON((await res.json()).message.content.match(/\{[\s\S]*\}/)?.[0] ?? 'null')

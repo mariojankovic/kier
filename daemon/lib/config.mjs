@@ -55,6 +55,13 @@ const defaults = {
   runtime: 'auto',
   // Optional owner-supplied inference server. Never selected until confirmed in Setup.
   externalModel: null,
+  // Requests typed to Kier are read as one action by its own model (command.mjs). Off, Kier matches phrasings as
+  // before; it is also what research/command-bench switches to compare the two.
+  typedCommands: true,
+  // Messages are first asked only whether they are a task (tagger.mjs firstWords), in one pass that needs no model in
+  // memory. Off, every message gets the full reading as before. Kier Mail's sorting (mail-assist.mjs) and Kier
+  // Audit's background picks (audit-assist.mjs) are read the same way, under the same switch.
+  firstWord: true,
   ollama: 'http://127.0.0.1:11434',
   port: 4777,
   briefTimes: ['08:00', '20:00'],

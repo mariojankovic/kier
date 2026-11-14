@@ -6,6 +6,7 @@ import re
 import socket
 import stat
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_BODY = 2 * 1024 * 1024
@@ -122,6 +123,8 @@ class SecureHandler(BaseHTTPRequestHandler):
         timer = threading.Timer(REQUEST_SECONDS, lambda: os._exit(70))
         timer.daemon = True
         timer.start()
+        # For work that can stop by itself in time (llm_server.py), so the deadline above stays the last resort.
+        self.began = time.monotonic()
         try:
             (self.post if post else self.get)()
         except Exception:

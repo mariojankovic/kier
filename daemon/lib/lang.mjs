@@ -120,3 +120,7 @@ const PRONOUNS = {
   they: { self: 'themselves', SELF: 'THEMSELVES', his: 'their', him: 'them', he: 'they', makes: 'make', promises: 'promise', commits: 'commit' },
 }
 export const P = PRONOUNS[config.pronoun] || PRONOUNS.they
+
+// How a summary says the owner asked someone else to do something: "<owner> asks Filip to …". Waiting on others is made
+// from summaries that read this way (tasks.mjs), and the tagger checks for the same words before skipping one (tagger.mjs).
+export const ASK_VERBS = ['asks', 'tells', 'reminds', 'wants']

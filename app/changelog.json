@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.8.0",
+    "date": "2026-11-14",
+    "title": "Ask in your own words, and lighter reading",
+    "notes": [
+      "Ask Kier in your own words and it does the right thing. \"Don't let me forget the passport photos on Thursday\" adds a reminder. \"The slides for Jonas are sent, cross that off\" finds the card and offers to tick it. \"Call it Budget review\" renames the card you have open. When Kier isn't sure which card you mean, it shows the closest few instead of guessing.",
+      "Reading in the background takes about a fifth of the memory. Most new messages are settled in one quick pass that never loads Kier's model, about 1.5 GB instead of 6. Only the ones that may be for you get the full reading.",
+      "Kier Mail's new mail is sorted in the same light pass. Kier also reads searches typed in plain words into who, when and what kind, and writes summaries and replies as you watch, in Kier Mail versions that ask for them.",
+      "Kier Audit can ask Kier what to clean first and what an item is. While you work, Kier Audit 0.5.3 asks only when there is something worth telling you, and Kier answers without loading its model.",
+      "A slow answer on a busy Mac now ends where it is instead of stopping Kier's model."
+    ],
+    "summary": "Ask Kier in your own words, and background reading takes a fifth of the memory."
+  },
+  {
     "version": "0.7.15",
     "date": "2026-11-14",
     "title": "Probably done, apart from your to-dos",

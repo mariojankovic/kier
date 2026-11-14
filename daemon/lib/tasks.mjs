@@ -1,3 +1,4 @@
+import { ASK_VERBS } from './lang.mjs'
 import { evidenceLine, ownerCreated } from './evidence-trust.mjs'
 import { authorization, readScope } from './authorization.mjs'
 import { callIntent, callbackCompletion } from './callbacks.mjs'
@@ -220,7 +221,7 @@ export function donePage(db, { offset = 0, limit = 100, days = 365 } = {}) {
 
 // Track the owner’s explicit requests to others, excluding conversational questions and
 // obligations between other people. Unanswered requests lapse after a week.
-const ASKS = new RegExp(`^${config.me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (?:asks|tells|reminds|wants) (.+?) to (.+)$`, 'i')
+const ASKS = new RegExp(`^${config.me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (?:${ASK_VERBS.join('|')}) (.+?) to (.+)$`, 'i')
 // A new owner task in the same conversation can indicate that responsibility has returned
 // to the owner rather than remaining with the other person.
 const HANDED_BACK = 3600
