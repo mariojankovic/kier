@@ -32,6 +32,8 @@ const languageName = new Intl.DisplayNames(['en'], { type: 'language' })
 const languages = [...new Set((sh('defaults', ['read', '-g', 'AppleLanguages']).match(/"?([a-z]{2,3})[-_"]/gi) || ['en"'])
   .map((m) => languageName.of(m.replace(/[^a-z]/gi, '').toLowerCase())))]
 const first = fullName.split(/\s+/)[0]
+// The Mac's region ("DE", "US"), for the few things that differ by where someone lives.
+export const region = (sh('defaults', ['read', '-g', 'AppleLocale']).match(/[_-]([A-Z]{2})(?![A-Za-z])/) || [])[1] || ''
 
 const defaults = {
   me: first,
@@ -84,6 +86,10 @@ const defaults = {
 }
 
 export const config = { ...defaults, ...(existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : {}) }
+// Where code usually lives under the home folder, when the owner hasn't listed their own (workRoots in config.json):
+// the names people and tools commonly use, GitHub Desktop's among them. Folders that don't exist cost nothing.
+export const workRoots = config.workRoots || ['Developer', 'Projects', 'Work', 'code', 'src', 'dev', 'Development', 'repos', 'Repositories', 'git', 'GitHub',
+  'Documents/GitHub', 'Sites', 'workspace', 'Source']
 // Kier's own runtime answers the Ollama-shaped API on a verified private Unix socket.
 // It counts as installed once its model is complete (runtime.mjs writes the mark last).
 export const mlxReady = () => existsSync(resolve(dataDir, 'llm/bin/python')) && existsSync(resolve(dataDir, 'models/qwen3.5-9b-4bit/.kier-ready'))

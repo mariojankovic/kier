@@ -1,13 +1,13 @@
 import { execFileSync } from '../lib/child-process.mjs'
 import { existsSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
-import { config, home } from '../lib/config.mjs'
+import { config, home, workRoots } from '../lib/config.mjs'
 import { inspectGit } from '../lib/safe-git.mjs'
 import { addItems, now } from '../lib/db.mjs'
 
 // Read matching commit subjects and links as advisory evidence, without collecting source code.
 export const source = 'git'
-const ROOTS = (config.workRoots || ['Work', 'Developer', 'Projects', 'code', 'src']).map((d) => resolve(home, d)).filter(existsSync)
+const ROOTS = workRoots.map((d) => resolve(home, d)).filter(existsSync)
 const DAYS = 14
 
 const run = (args, cwd) => {

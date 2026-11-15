@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 const dir = mkdtempSync(join(tmpdir(), 'kier-command-'))
 process.env.KIER_DATA_DIR = dir
-writeFileSync(join(dir, 'config.json'), JSON.stringify({ me: 'Sam', languages: ['English'], timezone: 'Europe/Zagreb', online: false, workRoots: [] }))
+writeFileSync(join(dir, 'config.json'), JSON.stringify({ me: 'Sam', languages: ['English', 'Croatian'], timezone: 'Europe/Zagreb', online: false, workRoots: [] }))
 after(() => rmSync(dir, { recursive: true, force: true }))
 const { command, grounded, shortlist, SURE } = await import('../lib/command.mjs')
 const { reminderQuestion } = await import('../lib/create-reminder.mjs')

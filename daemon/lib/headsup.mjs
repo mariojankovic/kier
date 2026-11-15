@@ -9,16 +9,17 @@ import { planInfo } from './plans.mjs'
 import { now } from './db.mjs'
 import { brief, isoDay } from './tasks.mjs'
 import { ollamaUp } from './tagger.mjs'
+import { P } from './lang.mjs'
 
 const N = config.me
 // The owner’s other languages, without their parenthetical descriptions.
 const OTHER = (config.languages || []).map((l) => String(l).split(' (')[0].trim()).filter((l) => l && l !== 'English')
 // Select events that need preparation; omit routine work blocks and recurring reminders.
-const ASK = `${N} has this on his calendar or to-do list for an upcoming day. Decide whether he'd want a gentle heads-up the day before. Yes when he has to be somewhere, meet someone, pay, bring or prepare something, or hit a deadline, or it's official or hard to move (a dentist, an exam, a repair booking, a flight). No for routine work blocks and recurring reminders he sets for himself, and for holidays unless they change his plans. Write the heads-up as a short label of at most 4 words in everyday British English, the way a person would say it, like "Dental checkup" or "Piano lesson". Reply with only JSON: {"important": true or false, "label": "..."}`
+const ASK = `${N} has this on ${P.his} calendar or to-do list for an upcoming day. Decide whether ${P.he}'d want a gentle heads-up the day before. Yes when ${P.he} ${P.has} to be somewhere, meet someone, pay, bring or prepare something, or hit a deadline, or it's official or hard to move (a dentist, an exam, a repair booking, a flight). No for routine work blocks and recurring reminders ${P.he} ${P.sets} for ${P.self}, and for holidays unless they change ${P.his} plans. Write the heads-up as a short label of at most 4 words in everyday British English, the way a person would say it, like "Dental checkup" or "Piano lesson". Reply with only JSON: {"important": true or false, "label": "..."}`
 
 // Add one grounded line of context: why, where, with whom or what to bring. Leave it empty
 // when no related message supports an explanation.
-const CONTEXT = (label, text, about) => `${N} has "${label}" coming up (on his calendar as "${text}")${about.length ? `, most likely to do with ${about.join(', ')}` : ''}. Below are recent messages that may or may not be about it. Write one short line of context to him, as "you" (never by his name: his own messages are what you said or asked), at most 14 words, in everyday British English: why, where, with whom, or what to bring or have ready. Leave out dates and times; the card already shows when. Use only what the messages say and only names that appear in them; never guess. Keep who did what exactly as the messages have it: someone who reminds, asks or recommends is not the one selling or doing it. If none of the messages is about this, the line is "". Reply with only JSON: {"context": "..."}`
+const CONTEXT = (label, text, about) => `${N} has "${label}" coming up (on ${P.his} calendar as "${text}")${about.length ? `, most likely to do with ${about.join(', ')}` : ''}. Below are recent messages that may or may not be about it. Write one short line of context to ${P.him}, as "you" (never by ${P.his} name: ${P.his} own messages are what you said or asked), at most 14 words, in everyday British English: why, where, with whom, or what to bring or have ready. Leave out dates and times; the card already shows when. Use only what the messages say and only names that appear in them; never guess. Keep who did what exactly as the messages have it: someone who reminds, asks or recommends is not the one selling or doing it. If none of the messages is about this, the line is "". Reply with only JSON: {"context": "..."}`
 
 async function ask(system, user) {
   const res = await modelFetch('/api/chat', {
@@ -47,7 +48,7 @@ export function candidates(db, b = brief(db)) {
 const SOURCES = ['whatsapp', 'imessage', 'mail', 'notifications', 'discord', 'ai']
 // Search in two steps: identify the event’s likely subject, then translate those terms into
 // stems for each configured language.
-const WORDS = (label, text) => `${N} has "${label}" coming up (on his calendar as "${text}"). List 2 to 5 English words people would use in chats about it beforehand: the thing itself and what it is most likely for (a pottery class may need clay or tools; a rehearsal may need an instrument or sheet music). Single lowercase words. Reply with only JSON: {"words": ["..."]}`
+const WORDS = (label, text) => `${N} has "${label}" coming up (on ${P.his} calendar as "${text}"). List 2 to 5 English words people would use in chats about it beforehand: the thing itself and what it is most likely for (a pottery class may need clay or tools; a rehearsal may need an instrument or sheet music). Single lowercase words. Reply with only JSON: {"words": ["..."]}`
 const STEMS = (lang, words) => `Give these words in ${lang} as people write them in casual chats, each as the short stem that matches all its forms (in Croatian "slik" matches slike, sliku, slikama). One stem per word, lowercase. Words: ${words.join(', ')}. Reply with only JSON: {"words": ["..."]}`
 
 export async function searchWords(label, text) {

@@ -10,7 +10,7 @@ import { execFileSync, spawn } from './child-process.mjs'
 import { rmSync, chmodSync, existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { basename, isAbsolute, resolve } from 'node:path'
 import { CLAUDE, CODEX } from './ask.mjs'
-import { config, home, tmpDir } from './config.mjs'
+import { config, home, tmpDir, workRoots } from './config.mjs'
 import { now } from './db.mjs'
 import { aboutItem, evidence } from './resolve.mjs'
 import { burstOf, contextFor } from './tagger.mjs'
@@ -19,7 +19,7 @@ import { tasks } from './tasks.mjs'
 
 const N = config.me
 const LABEL = { whatsapp: 'WhatsApp', imessage: 'iMessages', mail: 'email', notifications: 'notifications', ai: 'AI chats' }
-const ROOTS = (config.workRoots || ['Work', 'Developer', 'Projects', 'code', 'src']).map((d) => resolve(home, d)).filter(existsSync)
+const ROOTS = workRoots.map((d) => resolve(home, d)).filter(existsSync)
 
 // What the agent should do with it, by kind of card; anything outward goes back to the owner.
 const DO = {

@@ -6,7 +6,7 @@ import { snapshot } from './util.mjs'
 
 // Keep the old key->display-name map for existing collectors; identity lookups require an unambiguous saved record.
 const ROOT = resolve(home, 'Library/Application Support/AddressBook')
-// Phone numbers match on their last 9 digits; text sender IDs (MUP_RH, PGRDTY) and emails only match exactly, so a
+// Phone numbers match on their last 9 digits; text sender IDs (a bank's or a ministry's name in capitals) and emails only match exactly, so a
 // sender with no number never collapses to an empty key shared by every other one.
 const key = s => {
   const text = String(s).trim()

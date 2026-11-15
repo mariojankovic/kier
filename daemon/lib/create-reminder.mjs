@@ -3,23 +3,27 @@
 import { randomUUID } from 'node:crypto'
 import { addItems, now } from './db.mjs'
 import { resolveDue } from './dates.mjs'
-import { dateWords } from './lang.mjs'
+import { dateWords, speaks } from './lang.mjs'
 import { config } from './config.mjs'
 
-const DATES = dateWords(['en', 'hr'])
-const REQUEST = /^(?:(?:please|molim te)\s+|(?:can|could|would|will) you\s+|mo[žz]e[šs](?: li)?(?: me)?\s+)*(?:remind me\b|(?:add|create|set)(?: me)? (?:a |an )?(?:new )?(?:task|reminder)\b|podsjeti(?:ti)? me\b|podseti me\b|dodaj(?: mi)? (?:zadatak|podsjetnik)\b)\s*:?\s*/i
-const REFERENCE = /^(?:(?:about|on|to|na|za)\s+)?(?:it|this|that|them|the (?:task|card|reminder)|this (?:task|card|reminder)|that (?:task|card|reminder)|ovo|taj zadatak|ovaj zadatak)(?:\s|$)/i
-const DATE = /\b(?:(?:on|by|u|do|za)\s+)?(?:day after tomorrow|this evening|this morning|tomorrow|today|tonight|prekosutra|sutra|danas|ve[čc]eras|monday|tuesday|wednesday|thursday|friday|saturday|sunday|ponedjeljak|ponedjeljka|utorak|utorka|srijedu|srijeda|[čc]etvrtak|petak|petka|subotu|subota|nedjelju|nedjelja|\d{1,2}\.\s?\d{1,2}\.(?:\s?\d{4})?)(?:\s+(?:at|u)\s+\d{1,2}:\d{2})?|\b(?:at|u)\s+\d{1,2}:\d{2}\b/gi
+// Date words follow the owner's languages, like everywhere else in Kier. The instant phrasings below are English, and
+// Croatian for someone who writes Croatian: to anyone else "do" is a verb, not "by", and "u" is not "at".
+const DATES = dateWords()
+const hr = (words) => (speaks('hr') ? words : '')
+const REQUEST = new RegExp(`^(?:(?:please${hr('|molim te')})\\s+|(?:can|could|would|will) you\\s+${hr('|mo[žz]e[šs](?: li)?(?: me)?\\s+')})*(?:remind me\\b|(?:add|create|set)(?: me)? (?:a |an )?(?:new )?(?:task|reminder)\\b${hr('|podsjeti(?:ti)? me\\b|podseti me\\b|dodaj(?: mi)? (?:zadatak|podsjetnik)\\b')})\\s*:?\\s*`, 'i')
+const REFERENCE = new RegExp(`^(?:(?:about|on|to${hr('|na|za')})\\s+)?(?:it|this|that|them|the (?:task|card|reminder)|this (?:task|card|reminder)|that (?:task|card|reminder)${hr('|ovo|taj zadatak|ovaj zadatak')})(?:\\s|$)`, 'i')
+const DATE = new RegExp(`\\b(?:(?:on|by${hr('|u|do|za')})\\s+)?(?:day after tomorrow|this evening|this morning|tomorrow|today|tonight${hr('|prekosutra|sutra|danas|ve[čc]eras')}|monday|tuesday|wednesday|thursday|friday|saturday|sunday${hr('|ponedjeljak|ponedjeljka|utorak|utorka|srijedu|srijeda|[čc]etvrtak|petak|petka|subotu|subota|nedjelju|nedjelja')}|\\d{1,2}\\.\\s?\\d{1,2}\\.(?:\\s?\\d{4})?)(?:\\s+(?:at${hr('|u')})\\s+\\d{1,2}:\\d{2})?|\\b(?:at${hr('|u')})\\s+\\d{1,2}:\\d{2}\\b`, 'gi')
 
 // A time of day in the request ("at 7", "at 7pm", "18:30", "u 7", "u 19h", "7 ujutro", "navečer"), taken out of
 // the title and kept as HH:MM in the date words, which is where cards and Reminders read a time from. A bare hour is
 // read like Apple does: the next time the clock shows it, so "tomorrow at 7" is 07:00; "pm" or "evening" moves it.
-const EVENING = /\b(?:pm|p\.m\.|evening|tonight|in the evening|afternoon|nave[cč]er|ve[cč]eras|popodne|poslijepodne|uve[cč]e)\b/i
-const MORNING = /\b(?:am|a\.m\.|morning|in the morning|ujutro|jutros)\b/i
-const CLOCK = /(?:\b(?:at|@|around|by|u|oko|do)\s*)?\b([01]?\d|2[0-3])(?:[:.h]([0-5]\d))?\s*(?:h\b|sati\b|o'?clock\b)?\s*(am|pm|a\.m\.|p\.m\.)?(?=\s|$|[,.!?])/i
+const EVENING = new RegExp(`\\b(?:pm|p\\.m\\.|evening|tonight|in the evening|afternoon${hr('|nave[cč]er|ve[cč]eras|popodne|poslijepodne|uve[cč]e')})\\b`, 'i')
+// A bare "am" is the morning in English and "on" in German ("am Freitag"), so it only counts after an hour there.
+const MORNING = new RegExp(`\\b(?:${speaks('de') ? '' : 'am|'}a\\.m\\.|morning|in the morning${hr('|ujutro|jutros')})\\b`, 'i')
+const AT = `at|@|around|by${hr('|u|oko|do')}`
 export function takeTime(text, at = now(), due = '') {
   const t = String(text)
-  const m = t.match(new RegExp(`(?:\\b(?:at|@|around|by|u|oko|do)\\s*)\\b([01]?\\d|2[0-3])(?:[:.h]([0-5]\\d))?\\s*(?:h\\b|sati\\b|o'?clock\\b)?\\s*(am|pm|a\\.m\\.|p\\.m\\.)?(?=\\s|$|[,.!?])|\\b([01]?\\d|2[0-3])[:.]([0-5]\\d)\\b|\\b(1[0-2]|0?[1-9])\\s*(am|pm|a\\.m\\.|p\\.m\\.)(?=\\s|$|[,.!?])`, 'i'))
+  const m = t.match(new RegExp(`(?:\\b(?:${AT})\\s*)\\b([01]?\\d|2[0-3])(?:[:.h]([0-5]\\d))?\\s*(?:h\\b${hr('|sati\\b')}|o'?clock\\b)?\\s*(am|pm|a\\.m\\.|p\\.m\\.)?(?=\\s|$|[,.!?])|\\b([01]?\\d|2[0-3])[:.]([0-5]\\d)\\b|\\b(1[0-2]|0?[1-9])\\s*(am|pm|a\\.m\\.|p\\.m\\.)(?=\\s|$|[,.!?])`, 'i'))
   const part = t.match(EVENING) || t.match(MORNING)
   if (!m && !part) return { text: t, clock: '' }
   let hour, minute = 0, meridiem = ''
@@ -51,10 +55,10 @@ function dayFor(clock, at) {
   return h * 60 + m > parts[0] * 60 + parts[1] ? today : localDay(at + 86400)
 }
 const CROATIAN = /[čćšžđ]|\b(?:sutra|danas|prekosutra|ponedjelj|utor|srijed|petak|petku|subot|nedjelj|ujutro|nave[cč]er)/i
-const at_ = (words, clock) => (CROATIAN.test(words) ? ` u ${clock}` : ` at ${clock}`)
+const at_ = (words, clock) => (speaks('hr') && CROATIAN.test(words) ? ` u ${clock}` : ` at ${clock}`)
 
 // "Remind me what Nika said": the words after "remind me" ask for something to be told, not kept.
-const ASKING = /^(what|who|why|how|where|whether|if|when|after|kad|kada|što|sta|kaj|tko|gdje)\b/i
+const ASKING = new RegExp(`^(what|who|why|how|where|whether|if|when|after${hr('|kad|kada|što|sta|kaj|tko|gdje')})\\b`, 'i')
 export function reminderQuestion(question) {
   const q = String(question).trim().replace(/^mo[žz]e[šs](?: li)? me podsjetiti\s+/i, 'podsjeti me ')
   const prefix = q.match(REQUEST)
@@ -69,13 +73,13 @@ export function reminderRequest(question, at = now()) {
   if (!title || REFERENCE.test(title) || /\b(?:mark|snooze|reopen|dismiss)\b.*\b(?:card|task|reminder)\b/i.test(title) || ASKING.test(title)) return null
   const dates = [...title.matchAll(DATE)]
   // A bare time ("at 18:30") is not a day: the time logic below picks today or tomorrow.
-  const date = dates.find(m => !/^\s*(?:(?:at|@|by|around|u|oko|do)\s*)?\d/i.test(m[0]) && resolveDue(m[0], '', at, title, DATES))
+  const date = dates.find(m => !new RegExp(`^\\s*(?:(?:${AT})\\s*)?\\d`, 'i').test(m[0]) && resolveDue(m[0], '', at, title, DATES))
   const when = date?.[0] || ''
   const due = resolveDue(when, '', at, title, DATES)
   if (date) title = title.slice(0, date.index) + title.slice(date.index + when.length)
   const timed = takeTime(title, at, due || localDay(at))
   title = timed.text
-  title = title.trim().replace(/^[,.:;\-\s]+/, '').replace(/^(?:to|about|for|that I|da|na|za)\s+/i, '').replace(/^[,.:;\-\s]+/, '').replace(/\s+/g, ' ').trim().replace(/[,.:;]+$/, '').trim()
+  title = title.trim().replace(/^[,.:;\-\s]+/, '').replace(new RegExp(`^(?:to|about|for|that I${hr('|da|na|za')})\\s+`, 'i'), '').replace(/^[,.:;\-\s]+/, '').replace(/\s+/g, ' ').trim().replace(/[,.:;]+$/, '').trim()
   // A date followed by a reference still refers to an existing card.
   if (!title || REFERENCE.test(title)) return null
   const day = timed.clock && !due ? dayFor(timed.clock, at) : due
@@ -98,8 +102,11 @@ export function createReminder(db, request, at = now()) {
 // Asking Kier to remember something without the instant phrasings above ("can you create a reminder", "new task:
 // dentist Monday", "don't let me forget the rent", "napravi podsjetnik"). Only the owner's own message reaches this.
 export const ASK_DETAILS = 'Sure. What should I remind you about, and when?'
-const INTENT = /\b(remind|reminder|reminders|to-?do|task|forget|forgot|podsjet\p{L}*|zadat\p{L}*|zaborav\p{L}*|zapamti)\b/iu
-const PAST = /^\s*(?:did|have|has|had|was|were|what did|when did|who|jesam|jesi|je li|da li|sto je|što je|kaj je)\b/i
+// The words that suggest it, in English and in the owner's other languages; the model then decides.
+const INTENT_WORDS = { hr: 'podsjet\\p{L}*|zadat\\p{L}*|zaborav\\p{L}*|zapamti', de: 'erinner\\p{L}*|verg[ie]ss\\p{L}*|aufgabe', es: 'recu[eé]rd\\p{L}*|recordatorio|olvid\\p{L}*|tarea',
+  fr: 'rappel\\p{L}*|oubli\\p{L}*|t[âa]che', it: 'ricord\\p{L}*|promemoria|dimentic\\p{L}*', pt: 'lembr\\p{L}*|esque[cç]\\p{L}*|tarefa', nl: 'herinner\\p{L}*|vergeet|vergeten|taak' }
+const INTENT = new RegExp(`(?<!\\p{L})(remind|reminder|reminders|to-?do|task|forget|forgot${Object.entries(INTENT_WORDS).map(([l, w]) => (speaks(l) ? `|${w}` : '')).join('')})(?!\\p{L})`, 'iu')
+const PAST = new RegExp(`^\\s*(?:did|have|has|had|was|were|what did|when did|who${hr('|jesam|jesi|je li|da li|sto je|što je|kaj je')})\\b`, 'i')
 export const reminderIntent = (q) => INTENT.test(q) && !PAST.test(q)
 
 const PROMPT = `Decide whether the user is asking their assistant to create a NEW reminder or task for them. Questions about past reminders, or asking what someone said, are not.

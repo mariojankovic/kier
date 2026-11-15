@@ -4,8 +4,30 @@ import { redact } from '../lib/redact.mjs'
 
 test('IBAN and OIB are masked', () => {
   const { text, found } = redact('IBAN računa: HR' + '0'.repeat(19) + ' OIB: ' + '8'.repeat(11))
-  assert.equal(text, 'IBAN računa: [IBAN] OIB: [OIB]')
-  assert.deepEqual(found.sort(), ['iban', 'oib'])
+  assert.equal(text, 'IBAN računa: [IBAN] OIB: [ID]')
+  assert.deepEqual(found.sort(), ['iban', 'id'])
+})
+
+test('a labelled national or tax number is masked, whichever country it is from', () => {
+  // Built from repeats so no real-looking number sits in the source.
+  const d = (n) => '8'.repeat(n)
+  for (const [said, kept] of [
+    ['my SSN is ' + [d(3), d(2), d(4)].join('-'), 'my SSN is [ID]'],
+    ['ssn: ' + d(9) + ' thanks', 'ssn: [ID] thanks'],
+    ['National Insurance number QQ ' + [d(2), d(2), d(2)].join(' ') + ' C, as asked', 'National Insurance number [ID], as asked'],
+    ['Steuer-ID: ' + [d(2), d(3), d(3), d(3)].join(' '), 'Steuer-ID: [ID]'],
+    ['mi DNI es ' + d(8) + 'Z', 'mi DNI es [ID]'],
+    ['Codice fiscale RSSMRA' + d(2) + 'T' + d(2) + 'A' + d(3) + 'S', 'Codice fiscale [ID]'],
+    ['CPF ' + [d(3), d(3), d(3)].join('.') + '-' + d(2), 'CPF [ID]'],
+    ['BSN ' + d(9) + ' en verder niets', 'BSN [ID] en verder niets'],
+    ['numéro de sécurité sociale : ' + [d(1), d(2), d(2), d(2), d(3), d(3), d(2)].join(' '), 'numéro de sécurité sociale : [ID]'],
+    ['JMBG ' + d(13), 'JMBG [ID]'],
+  ]) assert.equal(redact(said).text, kept, said)
+})
+
+test('a label without a number, or an everyday word that looks like one, stays', () => {
+  for (const s of ['The SSN is required on page 2', 'Ich habe nie 12345 Schritte geschafft', 'Steuernummer 2026 fehlt noch', 'social security office, 12345 Main Street',
+    'BSN meeting moved to room 12']) assert.deepEqual(redact(s), { text: s, found: [] }, s)
 })
 
 test('login codes are masked', () => {

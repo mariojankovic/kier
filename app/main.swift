@@ -241,6 +241,12 @@ final class Eyes {
     return marked(window as! AXUIElement, searched: &searched)
   }
 
+  // What Chrome, Safari, Firefox and Edge call a private window, in English and in the other languages Kier knows:
+  // a browser set to German says "Inkognito" or "Privates Surfen", and what is copied there must stay out as well.
+  private static let privateWords = #"\b(incognito|inkognito|inc[oó]gnito|inprivate|private browsing|privates surfen|privater modus|privates fenster"#
+    + #"|navigation priv[ée]e|navegaci[oó]n privada|navega[cç][aã]o (privada|an[oóô]nima)|navigazione (privata|anonima|in incognito)"#
+    + #"|priv[ée]navigatie|priv[ée]modus|priv[ée]venster|anonimno|privatno (pregledavanje|pretra[zž][i]vanje))\b"#
+
   // Browsers say so in their own frame: the window title, the toolbar's profile button. The page itself is
   // skipped, since an article about incognito mode isn't an incognito window.
   private func marked(_ el: AXUIElement, searched: inout Int) -> Bool {
@@ -248,7 +254,7 @@ final class Eyes {
     guard searched < 800, attribute(el, kAXRoleAttribute) as? String != "AXWebArea" else { return false }
     for attr in [kAXTitleAttribute, kAXDescriptionAttribute, kAXHelpAttribute] {
       if let s = attribute(el, attr) as? String,
-         s.range(of: #"\b(incognito|inprivate|private browsing)\b"#, options: [.regularExpression, .caseInsensitive]) != nil { return true }
+         s.range(of: Self.privateWords, options: [.regularExpression, .caseInsensitive]) != nil { return true }
     }
     for c in attribute(el, kAXChildrenAttribute) as? [AXUIElement] ?? [] where marked(c, searched: &searched) { return true }
     return false

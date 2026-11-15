@@ -115,9 +115,9 @@ export const { weekdays: WEEKDAYS, relative: RELATIVE, months: MONTHS, monthEnd:
 
 // How prompts speak of the owner. Set `pronoun` in config.json; "they" until then.
 const PRONOUNS = {
-  he: { self: 'himself', SELF: 'HIMSELF', his: 'his', him: 'him', he: 'he', makes: 'makes', promises: 'promises', commits: 'commits' },
-  she: { self: 'herself', SELF: 'HERSELF', his: 'her', him: 'her', he: 'she', makes: 'makes', promises: 'promises', commits: 'commits' },
-  they: { self: 'themselves', SELF: 'THEMSELVES', his: 'their', him: 'them', he: 'they', makes: 'make', promises: 'promise', commits: 'commit' },
+  he: { self: 'himself', SELF: 'HIMSELF', his: 'his', him: 'him', he: 'he', makes: 'makes', promises: 'promises', commits: 'commits', has: 'has', sets: 'sets' },
+  she: { self: 'herself', SELF: 'HERSELF', his: 'her', him: 'her', he: 'she', makes: 'makes', promises: 'promises', commits: 'commits', has: 'has', sets: 'sets' },
+  they: { self: 'themselves', SELF: 'THEMSELVES', his: 'their', him: 'them', he: 'they', makes: 'make', promises: 'promise', commits: 'commit', has: 'have', sets: 'set' },
 }
 export const P = PRONOUNS[config.pronoun] || PRONOUNS.they
 

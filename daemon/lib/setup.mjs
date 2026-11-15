@@ -9,9 +9,11 @@ import { execFile } from './child-process.mjs'
 import { closeSync, existsSync, openSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { config, home, usesExternalModel, usesMlx } from './config.mjs'
+import { config, home, region, usesExternalModel, usesMlx } from './config.mjs'
 import { TERMS_URL, acceptTerms, myReminders, phoneCalendar, phoneReminders, setSwitch, termsAccepted } from './settings.mjs'
 import { now } from './db.mjs'
+
+const EU = new Set('AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE'.split(' '))
 import { installed as installedSecond } from './second.mjs'
 
 const exec = promisify(execFile)
@@ -81,7 +83,8 @@ function chatApps() {
     else if (a.missing) lines.push(`${a.missing}.`)
   }
   // No Mac app exists for these, so the browser is the way in: its notifications reach Kier like any app's.
-  lines.push('Messenger and Instagram: open them in your browser and allow notifications when asked; iPhone-only apps can\'t reach your Mac in the EU, because Apple blocks iPhone notifications on Mac there.')
+  // Apple leaves iPhone notifications on Mac out in the EU, so only someone there needs telling.
+  lines.push(`Messenger and Instagram: open them in your browser and allow notifications when asked${EU.has(region) ? '; iPhone-only apps can\'t reach your Mac in the EU, because Apple blocks iPhone notifications on Mac there' : ''}.`)
   return lines.join(' ')
 }
 

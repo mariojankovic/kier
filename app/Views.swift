@@ -1084,7 +1084,7 @@ private let keeps = [
   "downloads": "File names and sizes. Never what is inside.", "clipboard": "What you copy.", "apps": "Which app you use, and for how long.",
   "screen": "Conversation text in chat apps while they are in front.", "mail": "Email.",
   "ai": "Questions Claude or Codex asked you that are still unanswered, and what each session was about. Never the chat itself.",
-  "git": "Your commits in every repository on this Mac: the message and a link, never the code.",
+  "git": "Your commits in the repositories in your code folders, like Developer, Projects or GitHub: the message and a link, never the code.",
   "discord": "Conversations read from Discord's window while it's in front. Never what you're typing.",
   "social": "Your replies on Threads and X and the posts they answer, from the Kier extension in your browser. It never posts, likes or marks anything seen.",
 ]

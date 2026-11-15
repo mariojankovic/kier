@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.8.1",
+    "date": "2026-11-15",
+    "title": "The same Kier, whatever your language or country",
+    "notes": [
+      "Reminders you type are read in your own languages. \"Morgen\" or \"am Freitag\" now sets the day for someone who writes German, and words Kier only knows from Croatian no longer act on what an English speaker types: \"remind me to do 5 pushups\" stays exactly that.",
+      "ID numbers are hidden before anything is saved, whichever country they are from: a Social Security number, a National Insurance number, a Steuer-ID, a DNI, a codice fiscale, a CPF and others, when the message says what the number is.",
+      "Heads-ups speak of you the way you asked. They used to say \"he\" whatever you had chosen.",
+      "What you copy in a private browser window stays out when the browser is set to German, French, Spanish, Italian, Portuguese, Dutch or Croatian, not only English.",
+      "Kier finds your commits in more places: Developer, Projects, GitHub, GitHub Desktop's folder in Documents, Sites and other common code folders.",
+      "Setup mentions Apple's limit on iPhone notifications only where it applies, in the EU."
+    ],
+    "summary": "Reminders, privacy and heads-ups now work the same whatever your language or country."
+  },
+  {
     "version": "0.8.0",
     "date": "2026-11-14",
     "title": "Ask in your own words, and lighter reading",

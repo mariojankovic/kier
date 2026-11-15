@@ -24,7 +24,7 @@ from mlx_lm.models import base
 from mlx_lm.models.cache import load_prompt_cache, save_prompt_cache
 from mlx_lm.utils import load_model, load_tokenizer
 
-MAX_PROMPTS, MAX_CHOICES, MAX_LEAD_CHARS = 64, 20, 200
+MAX_PROMPTS, MAX_CHOICES, MAX_LEAD_CHARS = 64, 26, 200
 # A shared start shorter than this isn't worth a second set of states.
 MIN_SHARED = 64
 
