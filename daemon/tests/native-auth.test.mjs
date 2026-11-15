@@ -15,6 +15,13 @@ const epoch = Date.parse('2027-01-15T12:00:00Z') / 1000
 const secret = 'a'.repeat(64), nonce = 'b'.repeat(32), timestamp = String(epoch)
 writeFileSync(join(dir, 'token'), secret, { mode: 0o600 })
 const run = promisify(execFile)
+// Other software on the same Mac can knock on a port the moment it opens; twice that failed a release build here,
+// because any caller without Kier's proof failed the test. The daemon turns such a caller away and carries on, and so
+// do these listeners. What Kier's own client must do is asserted on its results and on the requests that verify.
+const turnAway = (t, req, res) => {
+  t.diagnostic(`turned away: ${req.method} from ${String(req.headers['user-agent'] || 'no agent').slice(0, 60)}`)
+  res.writeHead(401); res.end()
+}
 
 test('Swift shares JS MAC vectors and rejects fake, missing, changed and replayed response proofs', () => {
   const body = Buffer.from('{"close":["fixture"],"completionPolicy":"owner-verified"}')
@@ -45,13 +52,14 @@ test('actual Swift transport rejects a fake listener and redirects, then recover
   let mode = 'fake', calls = 0
   const verify = verifier(secret)
   const server = createServer(async (req, res) => {
-    calls++
     const chunks = []; for await (const c of req) chunks.push(c)
     const wire = Buffer.concat(chunks)
+    const requestNonce = verify(req.method, req.url, req.headers, wire)
+    if (!requestNonce) return turnAway(t, req, res)
+    // Only requests that carry Kier's proof count, so a client whose proof fails still fails the counts below.
+    calls++
     assert.equal(req.headers['x-kier-token'], undefined)
     assert.equal(wire.includes(Buffer.from('PRIVATE_FIXTURE')), false)
-    const requestNonce = verify(req.method, req.url, req.headers, wire)
-    assert.ok(requestNonce)
     assert.equal(openBody(secret, wire).toString(), 'PRIVATE_FIXTURE')
     if (mode === 'redirect') { res.writeHead(307, { location: '/leak' }); return res.end() }
     if (mode === 'fake') { res.setHeader('x-kier-response', '0'.repeat(64)); return res.end('{"on":true,"close":["fixture"]}') }
@@ -100,7 +108,8 @@ test('Swift reads a streamed reply line by line and rejects changed, reordered, 
   const server = createServer(async (req, res) => {
     const chunks = []; for await (const c of req) chunks.push(c)
     const requestNonce = verify(req.method, req.url, req.headers, Buffer.concat(chunks))
-    assert.ok(requestNonce)
+    // A client whose proof fails gets no signed reply, and the probes below then report it.
+    if (!requestNonce) return turnAway(t, req, res)
     if (mode === 'good') {
       signResponse(res, secret, requestNonce)
       res.streamLines()

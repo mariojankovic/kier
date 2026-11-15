@@ -8,6 +8,7 @@ import { actionTitle, ownerVerdict } from './owner-action.mjs'
 // Short replies see earlier messages from the same chat so references have a subject.
 // The worked examples are invented.
 import { discordCopy, discordMessage, reconcileDiscordCopies } from './discord-copies.mjs'
+import { mailCopy, reconcileMailCopies } from './mail-copies.mjs'
 import { config } from './config.mjs'
 import { ASK_VERBS, P, calmed, speaks, wordRegex } from './lang.mjs'
 import { names, slice } from './profile.mjs'
@@ -374,7 +375,7 @@ const FIRST_BATCH = 12
 export function firstPrompts(db, items) {
   const asked = []
   for (const item of items) {
-    if (discordCopy(db, item)) continue
+    if (discordCopy(db, item) || mailCopy(db, item)) continue
     const burst = burstOf(db, item)
     if (!burst.last) continue
     const group = (() => { try { return JSON.parse(item.meta || '{}').group } catch { return false } })()
@@ -428,6 +429,7 @@ export function excludeReminderNotices(db) {
 
 export async function tagPending(db, { limit = 25, sweep = sweepChoices } = {}) {
   reconcileDiscordCopies(db)
+  reconcileMailCopies(db)
   const items = pending(db, limit)
   // Quiet moments go to double checking tasks found earlier.
   if (!items.length) return { tagged: 0, ...(await doubleCheck(db)) }
@@ -442,7 +444,8 @@ export async function tagPending(db, { limit = 25, sweep = sweepChoices } = {}) 
   const copy = db.prepare(`select 1 from items i join tags t on t.item_id = i.id where i.source = ? and coalesce(i.thread, '') = ?
     and i.ts between ? and ? and i.text = ? and i.id != ? limit 1`)
   const read = async (item, first) => {
-    if (discordCopy(db, item)) {
+    // A banner of a message Kier reads in full elsewhere (a Discord channel, a mailbox) is left to that copy.
+    if (discordCopy(db, item) || mailCopy(db, item)) {
       save.run({ item_id: item.id, ...none, summary: '', model: 'twin', tagged_at: now(), said: null })
       tagged++
       return

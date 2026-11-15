@@ -301,13 +301,17 @@ export function briefMoment(b, at = now()) {
   return { at, line: n ? `${part} brief: ${n} ${n === 1 ? 'thing' : 'things'} waiting` : `${part} brief`, text: first ? first.summary : 'Nothing waiting on you.' }
 }
 
+// A dated task Kier believes is already done, or no longer needed, waits in the panel for a yes or no. It is not
+// announced a day ahead as well: that kept a task you had seen go away on the Today card until its day passed.
+export const announced = (t) => !['looks_done', 'looks_unneeded'].includes(t.state)
+
 // The coming week's events and dated tasks the model said are worth a heads-up (headsup.mjs), soonest first.
 function ahead(db, b) {
   const asked = db.prepare('select important, label, context from heads_up where key = ?')
   const when = (x) => `${x.day} ${x.ts ? timeLabel(x.ts) : '99:99'}`
   return [
     ...b.soon.events.map((e) => ({ id: e.id, day: e.day, ts: e.allDay ? null : e.ts, end: e.end || null, allDay: !!e.allDay, text: e.text, h: asked.get(`${e.id}@${e.day}`) })),
-    ...b.soon.tasks.map((t) => ({ id: t.id, card: t.id, day: t.due, ts: null, text: t.summary, from: from(t), h: asked.get(`${t.id}@${t.due}`) })),
+    ...b.soon.tasks.filter(announced).map((t) => ({ id: t.id, card: t.id, day: t.due, ts: null, text: t.summary, from: from(t), h: asked.get(`${t.id}@${t.due}`) })),
   ].filter((x) => x.h?.important === 1).map((x) => ({ ...x, label: x.h.label || x.text, context: x.h.context || null }))
     .sort((x, y) => when(x).localeCompare(when(y)))
 }

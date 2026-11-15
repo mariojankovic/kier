@@ -7,7 +7,7 @@ import { config } from './config.mjs'
 import { nearest } from './meaning.mjs'
 import { planInfo } from './plans.mjs'
 import { now } from './db.mjs'
-import { brief, isoDay } from './tasks.mjs'
+import { announced, brief } from './tasks.mjs'
 import { ollamaUp } from './tagger.mjs'
 import { P } from './lang.mjs'
 
@@ -20,6 +20,11 @@ const ASK = `${N} has this on ${P.his} calendar or to-do list for an upcoming da
 // Add one grounded line of context: why, where, with whom or what to bring. Leave it empty
 // when no related message supports an explanation.
 const CONTEXT = (label, text, about) => `${N} has "${label}" coming up (on ${P.his} calendar as "${text}")${about.length ? `, most likely to do with ${about.join(', ')}` : ''}. Below are recent messages that may or may not be about it. Write one short line of context to ${P.him}, as "you" (never by ${P.his} name: ${P.his} own messages are what you said or asked), at most 14 words, in everyday British English: why, where, with whom, or what to bring or have ready. Leave out dates and times; the card already shows when. Use only what the messages say and only names that appear in them; never guess. Keep who did what exactly as the messages have it: someone who reminds, asks or recommends is not the one selling or doing it. If none of the messages is about this, the line is "". Reply with only JSON: {"context": "..."}`
+
+// A second, narrow question before a line is kept: is it about this at all? Asked on its own the model answers it
+// reliably (16 of 16 made-up pairs); as one clause among the writing rules above it let a line through that named a
+// stranger and another errand, because a message that shared a word with the label was in the list.
+export const OTHER_MATTER = (label, text, line) => `${N} has "${label}" coming up (noted as "${text}"). This line of context was written for it: "${line}". Decide whether the line is clearly about a different matter: another bill, another errand, another project, other people's business. A line that could be useful preparation for "${label}" (what to bring, who it is with, where, why) is not a different matter. Reply with only JSON: {"other": true or false}`
 
 async function ask(system, user) {
   const res = await modelFetch('/api/chat', {
@@ -36,12 +41,22 @@ async function ask(system, user) {
 
 // What the coming week holds that hasn't been asked about yet, tomorrow first: its events and the tasks due then, by a
 // key that changes when the thing moves to another day.
+const upcoming = (b) => [
+  ...b.soon.events.map((e) => ({ day: e.day, key: `${e.id}@${e.day}`, text: e.text })),
+  // A task that looks done already is waiting for a yes or no, not for a heads-up.
+  ...b.soon.tasks.filter(announced).map((t) => ({ day: t.due, key: `${t.id}@${t.due}`, text: `${t.summary}${t.when_words ? ` (${t.when_words})` : ''}`, task: t.id })),
+].sort((x, y) => x.day.localeCompare(y.day))
+
 export function candidates(db, b = brief(db)) {
   const asked = db.prepare('select 1 from heads_up where key = ?')
-  return [
-    ...b.soon.events.map((e) => ({ day: e.day, key: `${e.id}@${e.day}`, text: e.text })),
-    ...b.soon.tasks.map((t) => ({ day: t.due, key: `${t.id}@${t.due}`, text: `${t.summary}${t.when_words ? ` (${t.when_words})` : ''}` })),
-  ].filter((c) => !asked.get(c.key)).sort((x, y) => x.day.localeCompare(y.day))
+  return upcoming(b).filter((c) => !asked.get(c.key))
+}
+
+// Kept heads-ups still ahead that were worked out an older way get one more look: before context existed, and while a
+// task's line could still come from someone else's conversation.
+export function stale(db, b = brief(db)) {
+  const row = db.prepare('select important, context, asked from heads_up where key = ?')
+  return upcoming(b).filter((c) => { const h = row.get(c.key); return h?.important === 1 && (h.context == null || (h.asked ?? 1) < ASKED) })
 }
 
 // The last month's messages with any of the words in them, newest first; the model decides which are really about it.
@@ -85,38 +100,55 @@ function relatedByWords(db, words) {
   return rows.map((m) => [score(m), m]).sort((a, b) => b[0] - a[0] || b[1].ts - a[1].ts).slice(0, 14).map(([, m]) => m)
 }
 
-async function explain(db, key, label, text, words, about = []) {
-  const found = await related(db, words, [label, ...about].join(' '))
+// A task's line comes from its own conversation and nowhere else: the chat or mail thread it was said in, nearest
+// messages first. Searching everything by the label's words finds other people's messages that only share a word
+// with it ("invoice", "payment"), and the line then names someone who has nothing to do with the task.
+const AROUND = 2 * 86400
+export function conversationAround(db, id) {
+  db = readScope(db, localAuthorization())
+  const cols = 'id, ts, sender, from_me, thread, text, source'
+  const self = db.prepare(`select ${cols} from items where id = ?`).get(id)
+  // A reminder or a card you added yourself has no conversation; a banner's thread is every banner of that app.
+  if (!self || ['kier', 'reminders'].includes(self.source)) return []
+  if (self.source === 'notifications') return [self]
+  return db.prepare(`select ${cols} from items where source = ? and thread = ? and ts between ? and ? order by abs(ts - ?), ts limit 14`)
+    .all(self.source, self.thread, self.ts - AROUND, now(), self.ts).sort((a, b) => a.ts - b.ts)
+}
+
+async function explain(db, key, label, text, words, about = [], task = null) {
+  const found = task ? conversationAround(db, task) : await related(db, words, [label, ...about].join(' '))
   if (!found.length) return ''
   // Label the owner’s messages as You so the model preserves who asked or did what.
   const lines = found.map((m) => `[${new Date(m.ts * 1000).toISOString().slice(0, 10)}] ${m.from_me ? 'You' : m.sender} in ${m.thread}: ${String(m.text).replace(/\s+/g, ' ').slice(0, 220)}`).join('\n')
   const r = await ask(CONTEXT(label, text, about), lines)
-  const line = String(r?.context ?? (r?.text && !r.text.includes('\n') ? r.text : '')).trim().replace(/^"|"$/g, '')
-  return line.replace(/\.$/, '')
+  const line = String(r?.context ?? (r?.text && !r.text.includes('\n') ? r.text : '')).trim().replace(/^"|"$/g, '').replace(/\.$/, '')
+  if (!line) return ''
+  // Kept only on a plain "not another matter": no line is better than one about someone else's business.
+  return (await ask(OTHER_MATTER(label, text, line), line))?.other === false ? line : ''
 }
 
-// Search strategy version: include likely subjects and inflected word stems.
-const ASKED = 2
+// Strategy version. 2: likely subjects and inflected word stems. 3: a task's line comes from its own conversation.
+const ASKED = 3
 
 export async function checkHeadsUps(db, limit = 6) {
-  const todo = candidates(db).slice(0, limit)
-  // Kept ones still ahead with no context yet, from before context existed or asked the older way, get another look.
-  const bare = db.prepare(`select key, label from heads_up where important = 1 and substr(key, instr(key, '@') + 1) >= ?
-    and (context is null or (context = '' and coalesce(asked, 1) < ?))`).all(isoDay(now()), ASKED)
-  if ((!todo.length && !bare.length) || !(await ollamaUp())) return {}
+  const b = brief(db)
+  const todo = candidates(db, b).slice(0, limit)
+  const again = stale(db, b)
+  if ((!todo.length && !again.length) || !(await ollamaUp())) return {}
   const save = db.prepare('insert or replace into heads_up (key, important, label, words, context, at, asked) values (?, ?, ?, ?, ?, ?, ?)')
   let important = 0
-  for (const c of [...todo, ...bare.map((b) => ({ key: b.key, text: null }))]) {
-    const event = c.text ?? db.prepare('select text from items where id = ?').get(c.key.split('@')[0])?.text ?? ''
+  for (const c of [...todo, ...again]) {
+    const event = c.text
     const r = await ask(ASK, event)
     if (typeof r?.important !== 'boolean') continue
     const label = String(r.label || '').trim().slice(0, 40) || null
-    const { words, about } = r.important ? await searchWords(label || event, event) : { words: [], about: [] }
-    const context = r.important ? await explain(db, c.key, label || event, event, words, about).catch(() => '') : ''
+    // Only a calendar event is searched for across the chats; a task already has its conversation.
+    const { words, about } = r.important && !c.task ? await searchWords(label || event, event) : { words: [], about: [] }
+    const context = r.important ? await explain(db, c.key, label || event, event, words, about, c.task).catch(() => '') : ''
     save.run(c.key, r.important ? 1 : 0, label, JSON.stringify(words), context, now(), ASKED)
     important += r.important ? 1 : 0
   }
-  return { checked: todo.length + bare.length, important }
+  return { checked: todo.length + again.length, important }
 }
 
 // An event detail page includes its time, place, heads-up and related messages.

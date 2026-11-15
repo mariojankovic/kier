@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.8.6",
+    "date": "2026-11-15",
+    "title": "One mail, one card, and heads-ups that stay on topic",
+    "notes": [
+      "A mail could show up twice: once read from your mailbox and once from the banner your mail app showed for it. Closing one left the other open, so a heads-up for it kept coming back. Kier now treats the banner as the same mail. Doubles you already have are folded into one card, and what was decided on either copy is kept.",
+      "A dated task that already looks done no longer gets a heads-up the day before. It waits for your yes or no in the panel.",
+      "The line under a task's heads-up now comes only from that task's own conversation. Before, Kier searched all your recent mail and chats for words like \"invoice\", and the line could name someone who had nothing to do with it.",
+      "Every such line is checked once more before it is shown, and dropped if it is about another matter. Lines written the old way are redone.",
+      "Turning mail off in Setup now also stops banners from Spark installed through Setapp."
+    ],
+    "summary": "One mail is one card, and a heads-up no longer shows a line about someone else's business."
+  },
+  {
     "version": "0.8.5",
     "date": "2026-11-15",
     "title": "Kier Mail, at home in Kier",
