@@ -143,7 +143,7 @@ cat > "$APPENT" <<'PLIST'
 </dict>
 </plist>
 PLIST
-codesign --force --timestamp --options runtime --entitlements "$APPENT" --identifier com.getkier.kier --sign "$IDENTITY" "$APP"
+codesign --force --timestamp --options runtime --entitlements "$APPENT" --identifier com.kier.ai --sign "$IDENTITY" "$APP"
 codesign --verify --strict --deep --verbose=1 "$APP" 2>&1 | tail -1
 
 notarize() {

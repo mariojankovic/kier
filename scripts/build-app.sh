@@ -54,6 +54,6 @@ with open(path, 'wb') as f: plistlib.dump(info, f)
 PYTHON
 /usr/libexec/PlistBuddy -c "Set :SUFeedURL ${KIER_UPDATE_FEED:-https://github.com/${KIER_PUBLIC_REPO:-mariojankovic/kier}/releases/latest/download/appcast.xml}" "$APP/Contents/Info.plist"
 for part in "$FW/Versions/B/Autoupdate" "$FW/Versions/B/Updater.app" "$FW"; do codesign --force --options runtime --sign "$IDENTITY" "$part"; done
-codesign --force --options runtime --identifier com.getkier.kier --sign "$IDENTITY" "$APP"
+codesign --force --options runtime --identifier com.kier.ai --sign "$IDENTITY" "$APP"
 codesign --verify --strict "$APP"
 echo "$APP"

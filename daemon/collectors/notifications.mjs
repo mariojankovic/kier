@@ -17,7 +17,7 @@ const PATH = resolve(home, 'Library/Group Containers/group.com.apple.usernoted/d
 // Kier's own, and apps whose data Kier reads directly from their database, where each message comes with its chat
 // around it. App ids are compared in lower case: WhatsApp reports itself as net.whatsapp.whatsapp, and the mixed case
 // spelling here let its notifications in as context-free duplicates.
-const SKIP = new Set(['com.getkier.kier', 'net.whatsapp.whatsapp', 'com.apple.mobilesms', 'com.apple.ical', 'com.apple.reminders', ...(config.notificationSkip || [])]
+const SKIP = new Set(['com.kier.ai', 'com.getkier.kier', 'net.whatsapp.whatsapp', 'com.apple.mobilesms', 'com.apple.ical', 'com.apple.reminders', ...(config.notificationSkip || [])]
   .map((id) => id.toLowerCase()))
 export const skipNotificationApp = (id) => SKIP.has(String(id).toLowerCase())
 // Kinds of app whose notifications are kept for search but never turned into tasks.

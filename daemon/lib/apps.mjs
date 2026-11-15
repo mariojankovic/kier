@@ -66,7 +66,7 @@ export function scan() {
 // A guess d1 isn't sure of counts as "other" (usage only). The never-read kinds take less certainty,
 // because wrongly reading a banking app costs more than wrongly ignoring a calculator.
 function route(kind, bundle, confidence) {
-  if (bundle === 'com.getkier.kier') return 'usage'
+  if (bundle === 'com.kier.ai' || bundle === 'com.getkier.kier') return 'usage'
   if (confidence != null && confidence < (NEVER.has(kind) ? 0.3 : 0.5)) return 'usage'
   if (NEVER.has(kind)) return 'never'
   if (DATABASE.has(bundle)) return 'database'

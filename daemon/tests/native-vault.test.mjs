@@ -33,7 +33,9 @@ test('credential operation names never enter the native channel', async () => {
 test('native storage uses a signed Kier-only ACL and never offers a credential CLI', () => {
   const native = readFileSync('../app/GmailVault.swift', 'utf8')
   assert.match(native, /SecCodeCheckValidity/)
-  assert.match(native, /com\.getkier\.kier/)
+  // Only the app signed under Kier's own identifier may reach the sign-in; the identifier of earlier releases no longer does.
+  assert.match(native, /kSecCodeInfoIdentifier as String\] as\? String == "com\.kier\.ai"/)
+  assert.doesNotMatch(native, /== "com\.getkier\.kier"/)
   assert.match(native, /kSecCodeInfoTeamIdentifier/)
   assert.match(native, /SecAccessCreate\("Kier Gmail" as CFString, \[app\] as CFArray/)
   assert.match(native, /kSecAttrAccess as String: access/)

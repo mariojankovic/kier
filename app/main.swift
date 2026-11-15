@@ -7,6 +7,8 @@ import Foundation
 // Accessibility to "Kier"; the Node process it starts inherits file access, and everything that needs
 // Accessibility or AppKit (the clipboard, which app is in front, text on screen) runs here in Kier itself.
 let info = Bundle.main.infoDictionary ?? [:]
+// Settings saved under the identifier of earlier releases come along before anything reads them.
+IdentityMigration.run()
 // A downloaded Kier carries its own Node and daemon inside the app; a development build points at the repo instead.
 let resources = Bundle.main.resourcePath ?? ""
 let bundled = FileManager.default.fileExists(atPath: resources + "/daemon/bin/kier.mjs")
@@ -671,6 +673,10 @@ if daemon {
   eyes = Eyes()
   eyes?.start()
   bar = Bar()
+  // After the rename macOS has forgotten what Kier was allowed to read: show Setup once, where each missing step is listed.
+  if IdentityMigration.setupOwed() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5) { MainActor.assumeIsolated { viewer.show("/setup") } }
+  }
   companion = MainActor.assumeIsolated { Companion(store: viewer.store) }
   // Only the downloaded Kier updates itself; a development build runs the daemon from a checkout.
   if bundled {

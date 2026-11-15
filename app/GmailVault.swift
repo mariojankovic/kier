@@ -43,7 +43,16 @@ final class GmailVault: @unchecked Sendable {
   init(directory: String, bundled: Bool) {
     self.bundled = bundled
     let digest = SHA256.hash(data: Data(directory.utf8)).map { String(format: "%02x", $0) }.joined()
-    service = "com.getkier.gmail." + digest.prefix(16) + (bundled ? ".native-v2" : ".development-v1")
+    // The sign-in is locked to the app that saved it. Kier's bundle identifier changed after "native-v2", so what that
+    // release saved can no longer be read by this one: it is removed, and Gmail is connected again under "native-v3".
+    service = "com.getkier.gmail." + digest.prefix(16) + (bundled ? ".native-v3" : ".development-v1")
+    earlier = bundled ? "com.getkier.gmail." + digest.prefix(16) + ".native-v2" : nil
+  }
+  private let earlier: String?
+  private func forgetEarlierSignIn() {
+    guard let earlier else { return }
+    SecKeychainSetUserInteractionAllowed(false)
+    SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: earlier, kSecAttrAccount as String: "refresh"] as CFDictionary)
   }
   // Called immediately before launching the exact process receiving our pipes.
   func prepareForLaunch(node: URL, daemon: URL) throws {
@@ -56,11 +65,12 @@ final class GmailVault: @unchecked Sendable {
           SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
           SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
           let details = info as? [String: Any],
-          details[kSecCodeInfoIdentifier as String] as? String == "com.getkier.kier",
+          details[kSecCodeInfoIdentifier as String] as? String == "com.kier.ai",
           let team = details[kSecCodeInfoTeamIdentifier as String] as? String, !team.isEmpty,
           SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess, let requirement
     else { throw URLError(.noPermissionsToReadFile) }
     _ = google
+    forgetEarlierSignIn()
     runtime = try GmailRuntimeSeal(bundle: Bundle.main.bundleURL, requirement: requirement, node: node, daemon: daemon)
   }
   private func trustedAccess() throws -> SecAccess {
@@ -72,7 +82,7 @@ final class GmailVault: @unchecked Sendable {
           SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
           SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
           let details = info as? [String: Any],
-          details[kSecCodeInfoIdentifier as String] as? String == "com.getkier.kier",
+          details[kSecCodeInfoIdentifier as String] as? String == "com.kier.ai",
           let team = details[kSecCodeInfoTeamIdentifier as String] as? String, !team.isEmpty,
           let path = Bundle.main.executablePath else { throw URLError(.noPermissionsToReadFile) }
     var app: SecTrustedApplication?

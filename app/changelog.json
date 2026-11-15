@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.8.4",
+    "date": "2026-11-15",
+    "title": "Kier has a new name inside your Mac",
+    "notes": [
+      "Kier's internal name on your Mac is now com.kier.ai. macOS treats a renamed app as a new one and forgets what it was allowed to read, so Kier needs your permissions again. Setup opens by itself after this update and shows what is missing: Full Disk Access, Accessibility, Calendar and Reminders, and notifications.",
+      "If you connected Gmail, connect it again in Setup. The old sign-in was locked to the old name and has been removed from your keychain.",
+      "Your vault, your cards and your settings are untouched.",
+      "If Kier stays stuck after that, download it again from kier.so/ai and put it in place of the old one."
+    ],
+    "summary": "Kier needs its permissions again after this update. Setup opens and shows what to grant."
+  },
+  {
     "version": "0.8.3",
     "date": "2026-11-15",
     "title": "Kier reads more of your language",
