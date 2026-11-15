@@ -20,8 +20,8 @@ const ADULT_SITES = [
 const ADULT_TLDS = new Set(['xxx', 'porn', 'sex', 'adult', 'sexy'])
 // Parts of a host name, split on dots and dashes: "free-porn-tube.net" has "porn".
 const ADULT_LABEL = /porn|xxx|hentai|nsfw|^(sex|sexy|sexcam|nude|nudes|milf|fap|camgirls?|escorts?|erotic|erotica|erotik|rule34)$/
-// Search queries, page titles and file names. English and Croatian.
-const ADULT_WORDS = /(^|[^\p{L}\d])(porn\p{L}*|porno|pornić|xxx|nsfw|hentai|xvideos|xnxx|xhamster|onlyfans|chaturbate|nudes?|milfs?|camgirls?|rule ?34|blowjob|creampie|gangbang|sex|sexy|sexting|sextape|seks|jebanje|drkanje)(?=$|[^\p{L}\d])/iu
+// Search queries, page titles and file names, in English and the plain words of the other languages Kier knows.
+const ADULT_WORDS = /(^|[^\p{L}\d])(porn\p{L}*|porno|pornić|xxx|nsfw|hentai|xvideos|xnxx|xhamster|onlyfans|chaturbate|nudes?|milfs?|camgirls?|rule ?34|blowjob|creampie|gangbang|sex|sexy|sexting|sextape|seks|jebanje|drkanje|sexo|sesso|sexe|sexfilme?|sexvideos?|nacktbilder|desnud[oa]s|tette|putas?)(?=$|[^\p{L}\d])/iu
 // Words decide only for what the owner looked at or saved; in messages from people they are too often jokes.
 const WORD_SOURCES = new Set(['browser', 'downloads', 'clipboard'])
 

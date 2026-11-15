@@ -72,7 +72,7 @@ const sameName = (a, b) => first(a) && first(a) === first(b)
 function aliases(db) {
   const names = new Set([config.fullName].filter(Boolean))
   const mentioned = db.prepare(`select text from items where source = 'whatsapp' and from_me = 0 and text like '%@%' and ts > ? limit 400`).all(now() - 60 * 86400)
-  for (const r of mentioned) for (const m of String(r.text).matchAll(/@([A-ZČĆŠŽĐ][\p{L}]+)/gu)) if (first(m[1]) === first(N)) names.add(m[1])
+  for (const r of mentioned) for (const m of String(r.text).matchAll(/@(\p{Lu}[\p{L}]+)/gu)) if (first(m[1]) === first(N)) names.add(m[1])
   return [...names].filter((n) => n && n !== N)
 }
 

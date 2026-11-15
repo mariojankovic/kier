@@ -8,14 +8,20 @@ import { snapshot } from './util.mjs'
 const ROOT = resolve(home, 'Library/Application Support/AddressBook')
 // Phone numbers match on their last 9 digits; text sender IDs (a bank's or a ministry's name in capitals) and emails only match exactly, so a
 // sender with no number never collapses to an empty key shared by every other one.
+// Where a whole national number is eight digits (Denmark, Norway, Singapore, Hong Kong and others), nine digits would
+// reach into the country code, so a number with its country code and the same number without would never meet.
+// Those match on eight.
+const EIGHT = ['45', '47', '65', '852', '853', '356', '357', '371', '502', '503', '504', '505', '506', '507', '591', '598', '965', '968', '973', '974', '216']
+const withCode8 = digits => EIGHT.some(code => digits.length === code.length + 8 && digits.startsWith(code))
 const key = s => {
   const text = String(s).trim()
   const digits = text.replace(/\D/g, '')
-  return !text.includes('@') && /^[\d ()+.-]+$/.test(text) && digits.length >= 6 ? digits.slice(-9) : text.toLowerCase()
+  return !text.includes('@') && /^[\d ()+.-]+$/.test(text) && digits.length >= 6 ? digits.slice(withCode8(digits) ? -8 : -9) : text.toLowerCase()
 }
 
 export function contactIndex(records) {
   const people = new Map(), handles = new Map(), suffixes = new Map(), localSuffixes = new Map(), names = new Map(), legacy = new Map()
+  const coded8 = new Map(), local8 = new Map()
   const add = (map, alias, id) => {
     if (!alias) return
     if (!map.has(alias)) map.set(alias, new Set())
@@ -36,16 +42,21 @@ export function contactIndex(records) {
         add(suffixes, normalized.slice(-9), record.id)
         if (normalized.length <= 10) add(localSuffixes, normalized.slice(-9), record.id)
       }
+      if (withCode8(normalized)) add(coded8, normalized.slice(-8), record.id)
+      if (/^\d{8}$/.test(normalized)) add(local8, normalized, record.id)
       if (key(handle)) legacy.set(key(handle), record.name)
     }
   }
-  return { people, handles, suffixes, localSuffixes, names, legacy }
+  return { people, handles, suffixes, localSuffixes, names, legacy, coded8, local8 }
 }
 
 export function lookupContact(book, handle, nameHint) {
   const normalized = normalizePerson(handle)
   let ids = book.handles.get(normalized)
   if (!ids && /^\d{9,}$/.test(normalized)) ids = (normalized.length <= 10 ? book.suffixes : book.localSuffixes).get(normalized.slice(-9))
+  // Eight-digit countries: a local number against one saved with its country code, and the other way round.
+  if (!ids && /^\d{8}$/.test(normalized)) ids = book.coded8?.get(normalized)
+  if (!ids && withCode8(normalized)) ids = book.local8?.get(normalized.slice(-8))
   // A caller ID may already be a saved display name. Never choose between same-name contacts.
   if (!ids && nameHint) ids = book.names.get(normalizePerson(nameHint))
   if (!ids && normalized && !/[\d@]/.test(normalized)) ids = book.names.get(normalized)

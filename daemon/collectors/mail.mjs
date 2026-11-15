@@ -105,7 +105,10 @@ export function addresses(value) {
 }
 const display = a => a?.name || a?.email || ''
 export const conversation = (subject, other) => String(subject || '').replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/i, '').trim() || other
-const sentBox = s => /(?:^|[\/\s.])(?:sent(?: messages| mail| items)?|sentmail|poslano|poslane|gesendet)(?:$|[\/\s.])/i.test(String(s || ''))
+// A Sent folder by its name, when the server gives it no role: "Sent Messages", Gmail's "Messages envoyés", Outlook's
+// "Elementos enviados", and so on in the languages mail services name it in. A folder path may still be percent-encoded.
+const readable = s => { try { return decodeURIComponent(String(s || '')) } catch { return String(s || '') } }
+export const sentBox = s => /(?:^|[\/\s.])(?:sent(?: messages| mail| items)?|sentmail|poslano|poslane|poslana|gesendet|gesendete|enviados|enviadas|enviado|envoy[ée]s|inviata|inviati|verzonden|skickat|sendt|wys[łl]ane|odeslan[áaée]|l[äa]hetetyt|g[öo]nderilmi[şs]|отправленные|送信済み|已发送|보낸편지함)(?:$|[\/\s.])/iu.test(readable(s))
 export const automated = (from, subject, snippet, list) => !!list || /(?:^|[._-])(?:no[._-]?reply|do[._-]?not[._-]?reply|mailer[._-]?daemon|newsletter|notifications?)(?:[._@-]|$)/i.test(from)
   || /\b(?:newsletter|unsubscribe|payment receipt|order confirmation|your receipt|your invoice|shipping confirmation)\b/i.test(`${subject}\n${snippet}`)
 const messageID = value => {

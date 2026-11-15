@@ -2,6 +2,9 @@
 // carry a date. English always counts; the other languages come in with the owner's (config.languages, from System
 // Settings), so "sad" means "now" only to someone who writes Croatian. Teaching Kier a language means adding its words
 // here. Pronouns live here too, so every prompt speaks of the owner the way they asked ("they" until they say).
+// Rules with their own small tables keep them beside the rule, each gated by speaks(): what "I paid" looks like
+// (completion-evidence.mjs), how a day is asked about (ask.mjs), dates typed into a mail search (mail-query.mjs),
+// questions, requests and arrangements (owner-action.mjs), and the instant reminder phrasings (create-reminder.mjs).
 import { config } from './config.mjs'
 
 const CODES = { english: 'en', croatian: 'hr', serbian: 'hr', bosnian: 'hr', montenegrin: 'hr', german: 'de', spanish: 'es', french: 'fr',
@@ -84,22 +87,22 @@ const DATES = {
     relative: [[2, ['prekosutra']], [1, ['sutra']], [0, ['danas', 'veceras', 'jutros', 'popodne', 'nocas']]],
     months: { sij: 1, velj: 2, ozu: 3, tra: 4, svi: 5, lip: 6, srp: 7, kol: 8, ruj: 9, lis: 10, stu: 11, pro: 12 } },
   de: { weekdays: [[1, ['montag']], [2, ['dienstag']], [3, ['mittwoch']], [4, ['donnerstag']], [5, ['freitag']], [6, ['samstag', 'sonnabend']], [0, ['sonntag']]],
-    relative: [[2, ['ubermorgen']], [1, ['morgen']], [0, ['heute', 'heute abend']]],
+    relative: [[2, ['ubermorgen']], [1, ['morgen']], [0, ['heute', 'heute abend', 'heute morgen', 'heute fruh', 'heute nachmittag']]],
     months: { jan: 1, feb: 2, mar: 3, apr: 4, mai: 5, jun: 6, jul: 7, aug: 8, sep: 9, okt: 10, nov: 11, dez: 12 } },
   es: { weekdays: [[1, ['lunes']], [2, ['martes']], [3, ['miercoles']], [4, ['jueves']], [5, ['viernes']], [6, ['sabado']], [0, ['domingo']]],
-    relative: [[2, ['pasado manana']], [1, ['manana']], [0, ['hoy', 'esta noche']]],
+    relative: [[2, ['pasado manana']], [1, ['manana']], [0, ['hoy', 'esta noche', 'esta manana', 'esta tarde']]],
     months: { ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6, jul: 7, ago: 8, sep: 9, oct: 10, nov: 11, dic: 12 } },
   fr: { weekdays: [[1, ['lundi']], [2, ['mardi']], [3, ['mercredi']], [4, ['jeudi']], [5, ['vendredi']], [6, ['samedi']], [0, ['dimanche']]],
-    relative: [[2, ['apres-demain', 'apres demain']], [1, ['demain']], [0, ["aujourd'hui", 'ce soir']]],
+    relative: [[2, ['apres-demain', 'apres demain']], [1, ['demain']], [0, ["aujourd'hui", 'ce soir', 'ce matin', 'cet apres-midi']]],
     months: { jan: 1, fev: 2, mar: 3, avr: 4, mai: 5, aou: 8, sep: 9, oct: 10, nov: 11, dec: 12 } },
   it: { weekdays: [[1, ['lunedi']], [2, ['martedi']], [3, ['mercoledi']], [4, ['giovedi']], [5, ['venerdi']], [6, ['sabato']], [0, ['domenica']]],
-    relative: [[2, ['dopodomani']], [1, ['domani']], [0, ['oggi', 'stasera']]],
+    relative: [[2, ['dopodomani']], [1, ['domani']], [0, ['oggi', 'stasera', 'stamattina', 'stanotte']]],
     months: { gen: 1, feb: 2, mar: 3, apr: 4, mag: 5, giu: 6, lug: 7, ago: 8, set: 9, ott: 10, nov: 11, dic: 12 } },
   pt: { weekdays: [[1, ['segunda']], [2, ['terca']], [3, ['quarta']], [4, ['quinta']], [5, ['sexta']], [6, ['sabado']], [0, ['domingo']]],
-    relative: [[2, ['depois de amanha']], [1, ['amanha']], [0, ['hoje', 'hoje a noite']]],
+    relative: [[2, ['depois de amanha']], [1, ['amanha']], [0, ['hoje', 'hoje a noite', 'esta manha', 'esta tarde']]],
     months: { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 } },
   nl: { weekdays: [[1, ['maandag']], [2, ['dinsdag']], [3, ['woensdag']], [4, ['donderdag']], [5, ['vrijdag']], [6, ['zaterdag']], [0, ['zondag']]],
-    relative: [[2, ['overmorgen']], [1, ['morgen']], [0, ['vandaag', 'vanavond']]],
+    relative: [[2, ['overmorgen']], [1, ['morgen']], [0, ['vandaag', 'vanavond', 'vanmorgen', 'vanochtend', 'vanmiddag', 'vannacht']]],
     months: { jan: 1, feb: 2, mrt: 3, apr: 4, mei: 5, jun: 6, jul: 7, aug: 8, sep: 9, okt: 10, nov: 11, dec: 12 } },
 }
 export function dateWords(languages = langs) {

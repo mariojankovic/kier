@@ -11,7 +11,8 @@ import { spawn } from './child-process.mjs'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { config, dataDir, home, tmpDir } from './config.mjs'
-import { P } from './lang.mjs'
+import { P, RELATIVE, WEEKDAYS as DAY_STEMS, speaks } from './lang.mjs'
+import { firstWeekday } from './mail-query.mjs'
 import { profileText } from './profile.mjs'
 
 const cap = (s) => s[0].toUpperCase() + s.slice(1)
@@ -87,7 +88,7 @@ async function chatWords(q) {
 
 // What a question is about beyond the day and the asking ("puzzles" in "do I have puzzles on Friday").
 const SCAFFOLD = /^(what|whats|have|anything|free|busy|need|plan|plans|planned|schedule|calendar|today|tonight|tomorrow|this|next|week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday|danas|sutra|vikend|else|there|then|again|like|really|still|left|going|happening|doing)$/
-const topic = (q) => (q.toLowerCase().match(/\p{L}{4,}/gu) || []).some((w) => !SCAFFOLD.test(w))
+const topic = (q) => (q.toLowerCase().match(/\p{L}{4,}/gu) || []).some((w) => !SCAFFOLD.test(w) && !(asked.some((l) => l.filler.has(fold(w))) || dayWord(fold(w))))
 const WEEKDAYS = [/\b(sunday|nedjelj)/i, /\b(monday|ponedjelj)/i, /\b(tuesday|utor)/i, /\b(wednesday|srijed)/i, /\b(thursday|[cč]etvrt)/i, /\b(friday|pet(ak|ku))\b/i, /\b(saturday|subot)/i]
 
 // Which days such a question means, first and last, worked out here rather than by the model.
@@ -101,13 +102,68 @@ function daysAsked(q) {
   // On a weekend, "next weekend" is the one after; on a weekday it's the coming one, same as "this weekend".
   if (/\bnext weekend\b/i.test(q) && (wd === 0 || wd === 6)) return wd === 0 ? [at(6), at(7)] : [at(7), at(8)]
   if (/\b(weekend|vikend)\b/i.test(q)) return wd === 0 ? [t0, t0] : wd === 6 ? [t0, at(1)] : [at(6 - wd), at(7 - wd)]
-  if (/\bnext week\b/i.test(q)) { const monday = (8 - wd) % 7 || 7; return [at(monday), at(monday + 6)] }
-  // On a Sunday, "this week" is the one starting tomorrow.
-  if (/\bthis week\b/i.test(q)) return [t0, at((7 - wd) % 7 || 7)]
+  // A week starts on the day this Mac's region starts it: Monday in most places, Sunday in the US.
+  const first = firstWeekday() % 7
+  if (/\bnext week\b/i.test(q)) { const start = ((first - wd + 7) % 7) || 7; return [at(start), at(start + 6)] }
+  // On the week's last day, "this week" is the one starting tomorrow.
+  if (/\bthis week\b/i.test(q)) return [t0, at(((first + 6 - wd + 7) % 7) || 7)]
   const weekday = WEEKDAYS.findIndex((re) => re.test(q))
   if (weekday >= 0) return [at((weekday - wd + 7) % 7), at((weekday - wd + 7) % 7)]
-  return null
+  return daysAskedMore(q)
 }
+
+// The same question in the owner's other languages. `frame` is how it is asked and `filler` the little words such a
+// question is made of. The day itself comes from Kier's date words for those languages (lang.mjs) and the three
+// below, which are not single days. Everything is spelled without accents, the way the question is compared.
+const ASKED = {
+  hr: { frame: "(?:sto|sta|kaj) imam|imam li (?:sto|ista|nesto)|jesam li slobod(?:an|na)|moj (?:dan|tjedan|raspored|kalendar)|moji planovi|moje obaveze",
+    weekend: 'vikend', thisWeek: 'ovaj tjedan|ovog tjedna', nextWeek: 'sljedeci tjedan|iduci tjedan|sljedeceg tjedna|iduceg tjedna',
+    filler: 'imam|ista|nesto|jesam|slobodan|slobodna|tjedan|tjedna|raspored|kalendar|planovi|obaveze|ovaj|ovog|sljedeci|iduci|sljedeceg|iduceg|drugo' },
+  de: { frame: "was (?:habe|hab) ich|was steht (?:an|bei mir an)|was ist (?:geplant|los)|(?:habe|hab) ich(?: [^?.!]*)? (?:was|etwas|zeit|termine)|bin ich(?: [^?.!]*)? (?:frei|verplant|beschaftigt)|mein(?:e|en)? (?:tag|woche|plan|plane|kalender|termine)",
+    weekend: 'wochenende', thisWeek: 'diese woche|dieser woche', nextWeek: 'nachste woche|nachster woche|kommende woche',
+    filler: 'habe|steht|geplant|etwas|zeit|termine|termin|frei|verplant|beschaftigt|mein|meine|meinen|woche|plan|plane|kalender|diese|dieser|nachste|nachster|kommende|wochenende|noch|sonst|denn|gibt|bitte|eigentlich|alles' },
+  es: { frame: "que tengo|tengo algo|que hay|estoy (?:libre|ocupad[oa])|mi (?:dia|semana|agenda|calenda[r]io)|mis planes",
+    weekend: 'fin de semana|finde', thisWeek: 'esta semana', nextWeek: 'la semana que viene|proxima semana|semana proxima',
+    filler: 'tengo|algo|estoy|libre|ocupado|ocupada|semana|agenda|calenda' + 'rio|planes|esta|proxima|viene|para|algun|alguna|cosa|pendiente|pendientes' },
+  fr: { frame: "qu'est-ce que j'ai|j'ai quoi|qu'ai-je|j'ai quelque chose|est-ce que j'ai|je suis (?:libre|dispo|disponible|pris|prise|occupe|occupee)|mon (?:planning|agenda|calendrier|programme)|ma (?:journee|semaine)|mes plans",
+    weekend: 'week-end|weekend', thisWeek: 'cette semaine', nextWeek: 'la semaine prochaine|semaine prochaine',
+    filler: 'quelque|chose|suis|libre|dispo|disponible|pris|prise|occupe|occupee|planning|agenda|calendrier|programme|journee|semaine|plans|cette|prochaine|quoi|prevu|prevus|week|weekend|autre|encore' },
+  it: { frame: "(?:che )?cosa ho|che ho|ho qualcosa|ho impegni|sono (?:libero|libera|occupato|occupata)|la mia (?:giornata|settimana|agenda)|il mio (?:calenda[r]io|programma)|i miei (?:piani|impegni)",
+    weekend: 'weekend|fine settimana|fine della settimana', thisWeek: 'questa settimana', nextWeek: 'la prossima settimana|prossima settimana|settimana prossima',
+    filler: 'cosa|qualcosa|impegni|sono|libero|libera|occupato|occupata|giornata|settimana|agenda|calenda' + 'rio|programma|piani|questa|prossima|weekend|fine|della|altro|ancora' },
+  pt: { frame: "o que (?:eu )?tenho|que tenho|tenho (?:algo|alguma coisa|compromissos?)|estou (?:livre|ocupad[oa])|(?:meu|minha) (?:dia|semana|agenda|calenda[r]io)|meus planos",
+    weekend: 'fim de semana|fim-de-semana', thisWeek: 'esta semana|essa semana', nextWeek: 'proxima semana|semana que vem',
+    filler: 'tenho|algo|alguma|coisa|compromisso|compromissos|estou|livre|ocupado|ocupada|semana|agenda|calenda' + 'rio|planos|esta|essa|proxima|para|mais' },
+  nl: { frame: "wat heb ik|heb ik(?: [^?.!]*)? (?:iets|wat|afspraken|tijd)|ben ik(?: [^?.!]*)? (?:vrij|bezet)|mijn (?:dag|week|agenda|planning|plannen)",
+    weekend: 'weekend', thisWeek: 'deze week', nextWeek: 'volgende week|komende week',
+    filler: 'iets|afspraken|afspraak|vrij|bezet|tijd|mijn|week|agenda|planning|plannen|deze|volgende|komende|weekend|verder|staat|gepland' },
+}
+const asked = Object.entries(ASKED).filter(([code]) => speaks(code)).map(([, words]) => ({ ...words, filler: new Set(words.filler.split('|')) }))
+const fold = (s) => String(s).toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/[’‘]/g, "'")
+const whole = (words) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${words})(?![\\p{L}\\p{N}])`, 'u')
+const literal = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const relativeIn = (f, offset) => RELATIVE.find(([n]) => n === offset)?.[1].some((w) => whole(literal(w)).test(f))
+const weekdayIn = (f) => { const tokens = f.split(/[^a-z]+/); return DAY_STEMS.find(([, stems]) => tokens.some((t) => stems.some((s) => t.startsWith(s) && (s.length > 3 || t === s))))?.[0] ?? -1 }
+const span = (f, kind) => asked.some((l) => whole(l[kind]).test(f))
+const dayWord = (f) => [2, 1, 0].some((n) => relativeIn(f, n)) || weekdayIn(f) >= 0 || ['weekend', 'thisWeek', 'nextWeek'].some((kind) => span(f, kind))
+
+function daysAskedMore(q) {
+  const f = fold(q), t0 = today()
+  const wd = new Date(`${t0}T12:00:00Z`).getUTCDay(), first = firstWeekday() % 7
+  const at = (n) => plusDays(t0, n)
+  if (relativeIn(f, 2)) return [at(2), at(2)]
+  // "Heute Morgen" is this morning: with a word for today beside it, the other word is the time of day.
+  if (relativeIn(f, 1) && !relativeIn(f, 0)) return [at(1), at(1)]
+  if (relativeIn(f, 0)) return [t0, t0]
+  if (span(f, 'weekend')) return wd === 0 ? [t0, t0] : wd === 6 ? [t0, at(1)] : [at(6 - wd), at(7 - wd)]
+  if (span(f, 'nextWeek')) { const start = ((first - wd + 7) % 7) || 7; return [at(start), at(start + 6)] }
+  if (span(f, 'thisWeek')) return [t0, at(((first + 6 - wd + 7) % 7) || 7)]
+  const weekday = weekdayIn(f)
+  return weekday >= 0 ? [at((weekday - wd + 7) % 7), at((weekday - wd + 7) % 7)] : null
+}
+// Whether a question asks what is on a day, in English or in the owner's other languages.
+export const plansAsked = (q) => PLANS.test(q) || (asked.some((l) => whole(l.frame).test(fold(q))) && dayWord(fold(q)))
+export { daysAsked }
 const ACT =`${config.me} asked Kier to change something on ${P.his} list. Below are the tasks that may be meant, numbered, each with where it's from and its state now. Which does ${P.he} want changed, and to what: "open" (back on the list, not done), "done", "snoozed" (tomorrow) or "dismissed" (not ${P.his})? Only tasks the request clearly means, usually one; none if it's unclear. Reply with only JSON: {"actions": [{"n": 1, "to": "open"}]}`
 
 async function actionsFor(db, q, found, item) {
@@ -144,7 +200,7 @@ async function local(q, history = [], about = '', on = QUIET, item = null, actin
     : ''
   // For a topic question, retrieve relevant conversations as well as day summaries.
   // A bare date question can use the structured calendar and task list.
-  const plans = PLANS.test(q) && !topic(q) && !named(globalThis.kierDb, q)
+  const plans = plansAsked(q) && !topic(q) && !named(globalThis.kierDb, q)
   // A follow-up ("I mean on Friday") is searched with the questions before it.
   const context = history.slice(-3).map((h) => h.q).join('\n')
   if (!about && !plans) on.status('Working out what to look for')

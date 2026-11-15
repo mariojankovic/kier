@@ -16,7 +16,9 @@ export function collect(db) {
     const to = now() + AHEAD_DAYS * 86400 - APPLE_EPOCH
     // A reminder ticked off in Reminders stays in Calendar's copy, marked complete; it isn't something still to do.
     const done = cal.db.prepare("select 1 from pragma_table_info('CalendarItem') where name = 'completion_date'").get() ? 'i.completion_date' : 'null'
-    const cols = `i.summary, i.all_day, i.hidden, i.status, ${done} completed, c.title cal, l.title loc`
+    // The calendar Reminders keeps inside Calendar is named in the Mac's language; its identifier is the same everywhere.
+    const calId = cal.db.prepare("select 1 from pragma_table_info('Calendar') where name = 'external_id'").get() ? 'c.external_id' : 'null'
+    const cols = `i.summary, i.all_day, i.hidden, i.status, ${done} completed, c.title cal, ${calId} cal_id, l.title loc`
     const joins = 'left join Calendar c on c.ROWID = i.calendar_id left join Location l on l.ROWID = i.location_id'
     let rows
     try {
@@ -35,7 +37,7 @@ export function collect(db) {
     // duplicating those cards or feeding Kier’s own reminders back into the system.
     const cards = new Set(db.prepare('select summary from tags where is_task = 1 and summary is not null').all().map((t) => t.summary))
     const items = rows.filter((r) => r.summary && !r.hidden && r.status !== 3 && r.cal !== 'Kier' && !r.completed
-      && !(r.cal === 'Scheduled Reminders' && (myReminders() || cards.has(r.summary)))).map((r) => {
+      && !((r.cal === 'Scheduled Reminders' || r.cal_id === 'scheduled') && (myReminders() || cards.has(r.summary)))).map((r) => {
       const ts = Math.floor(r.start + APPLE_EPOCH)
       // When a timed event ends, so it can read "14:00-15:00".
       const end = !r.all_day && r.finish > r.start ? Math.floor(r.finish + APPLE_EPOCH) : null

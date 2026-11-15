@@ -10,7 +10,7 @@ process.env.KIER_DATA_DIR = join(dir, 'vault')
 mkdirSync(process.env.KIER_DATA_DIR)
 writeFileSync(join(process.env.KIER_DATA_DIR, 'config.json'), JSON.stringify({ me: 'Sam', fullName: 'Sam', languages: ['English', 'Croatian'], online: false, workRoots: [], backfillDays: 30 }))
 after(() => rmSync(dir, { recursive: true, force: true }))
-const { collect, mailStores, mailSetup, plainMail, addresses, mailDate } = await import('../collectors/mail.mjs')
+const { collect, mailStores, mailSetup, plainMail, addresses, mailDate, sentBox } = await import('../collectors/mail.mjs')
 const { APPLE_EPOCH } = await import('../collectors/util.mjs')
 const { open, now, addItems } = await import('../lib/db.mjs')
 const { setSource } = await import('../lib/settings.mjs')
@@ -614,4 +614,10 @@ test('Forget holds against the stored form: no-id mail, coded threads, and digit
   assert.equal(rows.length, 2)
   forget(db, { id: rows[0].id })
   assert.equal(db.prepare("select count(*) n from items where source = 'mail' and thread = 'Rota'").get().n, 1, 'a different sender is not forgotten with it')
+})
+
+test('a Sent folder is known by its name in the languages mail services use', () => {
+  for (const box of ['imap://mail.example.test/Sent%20Messages', '[Gmail]/Sent Mail', 'Sent Items', '[Gmail]/Gesendet', 'Gesendete Elemente', '[Gmail]/Enviados',
+    'Elementos enviados', '[Gmail]/Messages envoy%C3%A9s', 'Éléments envoyés', '[Gmail]/Posta inviata', 'Verzonden items', '[Gmail]/Poslana pošta', 'Poslano']) assert.ok(sentBox(box), box)
+  for (const box of ['INBOX', 'Archive', 'Absent', 'Presentations', 'Consent forms', 'Enviar luego', 'Verzendlijst']) assert.ok(!sentBox(box), box)
 })

@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.8.3",
+    "date": "2026-11-15",
+    "title": "Kier reads more of your language",
+    "notes": [
+      "If you write German, Spanish, French, Italian, Portuguese or Dutch, Kier now understands more of what it only understood in English and Croatian. \"Ich habe Nika 20 EUR überwiesen\" suggests the matching card is done, the way \"I paid Nika 20 EUR\" does.",
+      "Ask what is on a day in your own words: \"Was habe ich morgen?\", \"¿Qué tengo esta semana?\", \"Wat heb ik vrijdag?\". A week starts on the day your Mac's region starts it.",
+      "Dates typed into Kier Mail's search are read in those languages too: \"letzte Woche\", \"la semaine dernière\", \"hace dos semanas\", \"due settimane fa\".",
+      "A question put to you by name gets its reply card in those languages, and a lunch on Friday keeps its appointment card instead of becoming a to-do.",
+      "Dates written with slashes are read the way your region writes them: 6/19 in the US, 19/6 elsewhere.",
+      "Mail you sent is recognised as yours in mailboxes named in other languages. The reminders Apple shows inside Calendar are recognised whatever language your Mac is in, so they no longer show up twice.",
+      "Contacts in countries with eight-digit phone numbers, such as Denmark, Norway and Singapore, are matched with or without the country code.",
+      "More bank and payment sites, from many more countries, are left out of what Kier keeps from your browsing."
+    ],
+    "summary": "Kier understands more of German, Spanish, French, Italian, Portuguese and Dutch, and follows your region for dates."
+  },
+  {
     "version": "0.8.2",
     "date": "2026-11-15",
     "title": "Private windows, in every language",

@@ -19,3 +19,12 @@ test('people joking in chats are kept, but a link to an adult site is not', () =
   assert.ok(!adult({ source: 'whatsapp', thread: 'Workshop', text: 'ovo je porno od koda haha' }))
   assert.ok(adult({ source: 'whatsapp', thread: 'Workshop', text: 'gledaj https://www.xvideos.com/video123' }))
 })
+
+test('adult words in the other languages Kier knows are dropped too, and their everyday neighbours kept', () => {
+  for (const text of ['Searched Google: videos de sexo', 'sesso video at DuckDuckGo', 'Searched Google: sexe en ligne', 'Searched Google: sexfilme kostenlos']) {
+    assert.ok(adult({ source: 'browser', thread: 'google.com', text }), text)
+  }
+  for (const text of ['Searched Google: sexto piso sin ascensor', 'Tetteh family recipes', 'Searched Google: essere o non essere']) {
+    assert.ok(!adult({ source: 'browser', thread: 'google.com', text }), text)
+  }
+})

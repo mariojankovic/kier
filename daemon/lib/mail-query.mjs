@@ -8,6 +8,7 @@
 import { execFileSync } from './child-process.mjs'
 import { localAuthorization, readScope } from './authorization.mjs'
 import { config } from './config.mjs'
+import { speaks } from './lang.mjs'
 import { fillForm, ranked } from './form.mjs'
 import { contacts } from '../collectors/contacts.mjs'
 import { automated } from '../collectors/mail.mjs'
@@ -133,7 +134,7 @@ function moment(words, today, first) {
   if (words.length === 1) {
     if (a === 'today' || a === 'danas') return [today, days(today, 1)]
     if (a === 'yesterday' || a === 'jucer') return [days(today, -1), today]
-    if (a === 'prekjucer') return [days(today, -2), days(today, -1)]
+    if (a === 'prekjucer' || a === 'daybefore') return [days(today, -2), days(today, -1)]
     const weekday = weekdayOf(a)
     if (weekday >= 0) { const day = lastWeekday(today, weekday); return [day, days(day, 1)] }
     const month = anyMonth(a)
@@ -163,9 +164,72 @@ function moment(words, today, first) {
   return null
 }
 
+// --- The same date words in the owner's other languages, put into the English ones above so the same rules read
+// them: "letzte Woche" is "last week", "la semaine dernière" is "week last" turned round, "hace dos semanas" is "2 week
+// ago". Spelled without accents, like the words they are compared with. Each language counts only for someone who
+// writes it, and its little words ("la", "de", "im") are dropped only from a phrase that has one of its date words.
+const list = (words) => words.split(' ')
+const OTHER_DATES = {
+  de: { phrases: [], today: 'heute', yesterday: 'gestern', daybefore: 'vorgestern', this: 'diese dieser diesen dieses diesem', last: 'letzte letzter letzten letztes letztem vorige voriger vorigen voriges vergangene vergangenen',
+    day: 'tag tage tagen', week: 'woche wochen', month: 'monat monate monaten monats', year: 'jahr jahre jahren jahres', one: 'ein eine einen einem einer', numbers: 'zwei drei vier funf sechs sieben acht neun zehn',
+    months: 'januar februar marz april mai juni juli august september oktober november dezember', weekdays: 'sonntag montag dienstag mittwoch donnerstag freitag samstag',
+    since: 'seit', after: 'nach', before: 'vor', until: 'bis', agoBefore: 'vor', agoAfter: '', drop: 'der die das den dem des im am in vom von an' },
+  es: { phrases: [], today: 'hoy', yesterday: 'ayer', daybefore: 'anteayer antier', this: 'este esta', last: 'pasado pasada pasados pasadas ultimo ultima ultimos ultimas anterior',
+    day: 'dia dias', week: 'semana semanas', month: 'mes meses', year: 'ano anos', one: 'un una uno', numbers: 'dos tres cuatro cinco seis siete ocho nueve diez',
+    months: 'enero febrero marzo abril mayo junio julio agosto septiembre octubre noviembre diciembre', weekdays: 'domingo lunes martes miercoles jueves viernes sabado',
+    since: 'desde', after: 'despues', before: 'antes', until: 'hasta', agoBefore: 'hace', agoAfter: '', drop: 'el la los las de del en' },
+  fr: { phrases: [["aujourd'hui", 'today'], ['avant-hier', 'daybefore'], ['il y a', 'agobefore'], ["jusqu'au", 'until'], ["jusqu'a", 'until'], ["jusqu'en", 'until']], today: '', yesterday: 'hier', daybefore: '',
+    this: 'ce cet cette', last: 'dernier derniere derniers dernieres passe passee',
+    day: 'jour jours', week: 'semaine semaines', month: 'mois', year: 'an ans annee annees', one: 'un une', numbers: 'deux trois quatre cinq six sept huit neuf dix',
+    months: 'janvier fevrier mars avril mai juin juillet aout septembre octobre novembre decembre', weekdays: 'dimanche lundi mardi mercredi jeudi vendredi samedi',
+    since: 'depuis', after: 'apres', before: 'avant', until: '', agoBefore: 'agobefore', agoAfter: '', drop: 'le la les l de du des en au d' },
+  it: { phrases: [["l'altro ieri", 'daybefore'], ['fino al', 'until'], ['fino a', 'until']], today: 'oggi', yesterday: 'ieri', daybefore: 'avantieri', this: 'questo questa', last: 'scorso scorsa scorsi scorse ultimo ultima ultimi ultime passato passata',
+    day: 'giorno giorni', week: 'settimana settimane', month: 'mese mesi', year: 'anno anni', one: 'un una uno', numbers: 'due tre quattro cinque sei sette otto nove dieci',
+    months: 'gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre novembre dicembre', weekdays: 'domenica lunedi martedi mercoledi giovedi venerdi sabato',
+    since: 'da dal dalla dallo', after: 'dopo', before: 'prima', until: '', agoBefore: '', agoAfter: 'fa', drop: 'il lo la i gli le l di del della dello dei nel nella in' },
+  pt: { phrases: [], today: 'hoje', yesterday: 'ontem', daybefore: 'anteontem', this: 'este esta esse essa', last: 'passado passada passados passadas ultimo ultima ultimos ultimas',
+    day: 'dia dias', week: 'semana semanas', month: 'mes meses', year: 'ano anos', one: 'um uma', numbers: 'dois tres quatro cinco seis sete oito nove dez',
+    months: 'janeiro fevereiro marco abril maio junho julho agosto setembro outubro novembro dezembro', weekdays: 'domingo segunda terca quarta quinta sexta sabado',
+    since: 'desde', after: 'depois apos', before: 'antes', until: 'ate', agoBefore: 'ha faz', agoAfter: 'atras', drop: 'o a os as de do da dos das em no na nos nas' },
+  nl: { phrases: [], today: 'vandaag', yesterday: 'gisteren', daybefore: 'eergisteren', this: 'deze dit', last: 'vorige vorig afgelopen laatste voorbije',
+    day: 'dag dagen', week: 'week weken', month: 'maand maanden', year: 'jaar jaren', one: 'een', numbers: 'twee drie vier vijf zes zeven acht negen tien',
+    months: 'januari februari maart april mei juni juli augustus september oktober november december', weekdays: 'zondag maandag dinsdag woensdag donderdag vrijdag zaterdag',
+    since: 'sinds', after: 'na', before: 'voor', until: 'tot', agoBefore: '', agoAfter: 'geleden', drop: 'de het in op van' },
+}
+const otherDates = Object.entries(OTHER_DATES).filter(([code]) => speaks(code)).map(([, l]) => {
+  const to = new Map()
+  const put = (words, english) => { for (const w of list(words)) if (w) to.set(w, english) }
+  for (const kind of ['today', 'yesterday', 'daybefore', 'this', 'last', 'day', 'week', 'month', 'year', 'since', 'after', 'before', 'until']) put(l[kind], kind)
+  put(l.one, '1'); list(l.numbers).forEach((w, i) => to.set(w, String(i + 2)))
+  list(l.months).forEach((w, i) => to.set(w, MONTHS[i])); list(l.weekdays).forEach((w, i) => to.set(w, WEEKDAYS[i]))
+  put(l.agoAfter, 'ago')
+  return { to, phrases: l.phrases, agoBefore: new Set(list(l.agoBefore).filter(Boolean)), drop: new Set(list(l.drop)) }
+})
+// "setiembre", "sonnabend" and the Portuguese weekdays with their "-feira" are the same words written another way.
+const SAME_WORD = { setiembre: 'septiembre', sonnabend: 'samstag', duas: 'dois' }
+function inEnglish(text) {
+  let folded = fold(text).replace(/[’‘]/g, "'")
+  for (const l of otherDates) for (const [phrase, english] of l.phrases) folded = folded.replaceAll(phrase, ` ${english} `)
+  let words = folded.split(/[^\p{L}\p{N}-]+/u).filter(Boolean).map((w) => SAME_WORD[w] || w.replace(/-feira$/, ''))
+  // The languages this phrase has a date word of; only their little words are dropped, and never a word any of them reads.
+  const matched = otherDates.filter((l) => words.some((w) => l.to.has(w) || l.agoBefore.has(w)))
+  const read = (w) => matched.some((l) => l.to.has(w) || l.agoBefore.has(w))
+  for (const l of matched) words = words.filter((w, i) => !(l.drop.has(w) && !read(w) && !(count(w) && unitOf(words[i + 1] || ''))))
+  for (const l of matched) {
+    // "vor zwei Wochen", "hace dos semanas", "il y a deux semaines": the word for "ago" comes first.
+    const n = (w) => count(l.to.get(w) || w), unit = (w) => unitOf(l.to.get(w) || w)
+    if (words.length === 3 && l.agoBefore.has(words[0]) && n(words[1]) && unit(words[2])) words = [words[1], words[2], 'ago']
+    words = words.map((w) => l.to.get(w) || w)
+  }
+  // "semaine dernière", "lunes pasado": the word for this or last comes second, and "3 derniers jours" has its count first.
+  if (words.length === 2 && ['this', 'last'].includes(words[1]) && !['this', 'last'].includes(words[0])) words = [words[1], words[0]]
+  if (words.length === 3 && words[1] === 'last' && count(words[0]) && unitOf(words[2])) words = ['last', words[0], words[2]]
+  return words
+}
+
 // The owner's date words as { after, before } (either may be null), or null when they aren't a date Kier knows.
 export function dateRange(text, today, first = firstWeekday()) {
-  let words = fold(text).split(/[^\p{L}\p{N}-]+/u).filter(Boolean)
+  let words = otherDates.length ? inEnglish(text) : fold(text).split(/[^\p{L}\p{N}-]+/u).filter(Boolean)
   const drop = (set) => { while (words.length > 1 && set.includes(words[0])) words = words.slice(1) }
   drop(['from', 'on', 'in', 'during', 'u', 'na', 'iz', 'tijekom', 'za'])
   const [a] = words

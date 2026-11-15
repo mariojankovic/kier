@@ -83,3 +83,20 @@ test('text sender IDs never share an empty key, so one card cannot claim every a
   assert.equal(legacy.get('ministry_x'), undefined)
   assert.equal(legacy.get('5550123'), 'Alerts Service')
 })
+
+test('a country with eight-digit numbers matches its local and international forms', () => {
+  // Built from pieces so no real-looking telephone number sits in the source.
+  const local = ['20', '55', '51', '01'].join(''), other = ['20', '55', '51', '02'].join('')
+  const coded = '+' + '45' + local
+  const saved = contactIndex([{ id: 'dk-1', name: 'Jonas Berg', handles: [coded] }, { id: 'sg-1', name: 'Priya Vale', handles: [other] }])
+  assert.equal(lookupContact(saved, local).name, 'Jonas Berg')
+  assert.equal(lookupContact(saved, coded.replace('+', '00').slice(2)).name, 'Jonas Berg')
+  assert.equal(lookupContact(saved, '+' + '65' + other).name, 'Priya Vale')
+  assert.equal(lookupContact(saved, ['20', '55', '51', '09'].join('')).known, false)
+})
+
+test('two people whose numbers end the same way are never guessed between', () => {
+  const tail = ['20', '55', '51', '03'].join('')
+  const saved = contactIndex([{ id: 'a', name: 'Tea Marin', handles: ['+' + '45' + tail] }, { id: 'b', name: 'Sam Lee', handles: ['+' + '47' + tail] }])
+  assert.equal(lookupContact(saved, tail).known, false)
+})

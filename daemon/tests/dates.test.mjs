@@ -33,3 +33,18 @@ test('words that are not in the message are ignored', () => {
 test('an hour is not a Saturday', () => {
   assert.equal(resolveDue('sat', '', sat, 'treba mi jos sat'), '')
 })
+
+test('a date written with slashes follows the region, unless only one reading can be a date', () => {
+  const us = { monthFirst: true }, elsewhere = { monthFirst: false }
+  assert.equal(resolveDue('11/5', '', sat, 'send it by 11/5', us), '2026-11-05')
+  assert.equal(resolveDue('11/5', '', sat, 'send it by 11/5', elsewhere), '2026-05-11')
+  assert.equal(resolveDue('19/11', '', sat, 'due 19/11', us), '2026-11-19')
+  assert.equal(resolveDue('11/19', '', sat, 'due 11/19', elsewhere), '2026-11-19')
+  assert.equal(resolveDue('3/1/27', '', sat, 'renew on 3/1/27', us), '2027-03-01')
+  assert.equal(resolveDue('3/1/2027', '', sat, 'renew on 3/1/2027', elsewhere), '2027-01-03')
+})
+
+test('"24/7" and a month that does not exist are not dates', () => {
+  assert.equal(resolveDue('24/7', '', sat, 'support is there 24/7', { monthFirst: false }), '')
+  assert.equal(resolveDue('40/40', '', sat, 'the score was 40/40', { monthFirst: true }), '')
+})

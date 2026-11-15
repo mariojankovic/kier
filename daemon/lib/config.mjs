@@ -82,7 +82,14 @@ const defaults = {
   // wants those shared adds them to scopes in config.json.
   scopes: Object.fromEntries(['claude', 'codex', 'kier'].map((c) => [c, ['kier', 'whatsapp', 'imessage', 'mail', 'calls', 'calendar', 'notifications', 'screen', 'discord', 'ai', 'git']])),
   blockedChats: [],
-  blockedDomains: ['1password.com', 'bitwarden.com', 'lastpass.com', 'dashlane.com', 'accounts.google.com', 'appleid.apple.com', 'revolut.com', 'paypal.com', 'wise.com', 'stripe.com', 'n26.com'],
+  // Never kept: password managers, sign-in pages, and banks and payment services. No list of banks is complete, so this
+  // is a spread of large ones from many countries; anyone can add their own in config.json.
+  blockedDomains: ['1password.com', 'bitwarden.com', 'lastpass.com', 'dashlane.com', 'accounts.google.com', 'appleid.apple.com', 'login.microsoftonline.com',
+    'paypal.com', 'wise.com', 'stripe.com', 'revolut.com', 'n26.com', 'monzo.com', 'klarna.com', 'venmo.com', 'cash.app', 'coinbase.com', 'binance.com', 'kraken.com',
+    'chase.com', 'bankofamerica.com', 'wellsfargo.com', 'citi.com', 'capitalone.com', 'americanexpress.com', 'barclays.co.uk', 'hsbc.com', 'hsbc.co.uk',
+    'lloydsbank.com', 'natwest.com', 'starlingbank.com', 'deutsche-bank.de', 'commerzbank.de', 'sparkasse.de', 'dkb.de', 'ing.com', 'ing.de', 'ing.nl',
+    'rabobank.nl', 'abnamro.nl', 'bnpparibas.com', 'credit-agricole.fr', 'societegenerale.fr', 'santander.com', 'bbva.com', 'caixabank.es',
+    'intesasanpaolo.com', 'unicredit.it', 'erstebank.hr', 'zaba.hr', 'pbz.hr', 'itau.com.br', 'nubank.com.br', 'tdbank.com', 'rbc.com', 'commbank.com.au'],
 }
 
 export const config = { ...defaults, ...(existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : {}) }
