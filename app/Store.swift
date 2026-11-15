@@ -39,6 +39,8 @@ struct Card: Codable, Identifiable, Hashable {
   let hint_url: String?
   // The app to open for Reply when the card has no link of its own (Discord, Messages, the app a notification came from).
   let open_app: String?
+  // Kier Mail's link to the conversation, for mail Kier read from Kier Mail.
+  let open_link: String?
   var mine: Bool { from_me?.on ?? false }
   var looksDone: Bool { state == "looks_done" }
   var looksUnneeded: Bool { state == "looks_unneeded" }
@@ -745,6 +747,7 @@ final class Store {
   // The chat itself when the card links to it, else the app the conversation lives in.
   func reply(_ card: Card) {
     if let url = card.chatURL { LinkPolicy.open(url) }
+    else if let link = card.mailLink { LinkPolicy.openMail(link) }
     else if let app = card.app { NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration()) }
   }
 

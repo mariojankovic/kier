@@ -26,6 +26,18 @@ enum LinkPolicy {
       || text.range(of: #"^codex://threads/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"#, options: .regularExpression) != nil
   }
 
+  // A conversation in Kier Mail, as Kier Mail's own Copy Link writes it and as the daemon builds it from the thread it
+  // read there: only this exact shape, and never a link out of a message.
+  static func allowsMail(_ url: URL) -> Bool {
+    url.absoluteString.range(of: #"^sweep://thread/[A-Za-z0-9%._~!*'()-]{1,600}$"#, options: .regularExpression) != nil
+  }
+
+  @discardableResult
+  static func openMail(_ url: URL) -> Bool {
+    guard allowsMail(url) else { return false }
+    return NSWorkspace.shared.open(url)
+  }
+
   @discardableResult
   static func openSession(_ url: URL) -> Bool {
     guard allowsSession(url) else { return false }

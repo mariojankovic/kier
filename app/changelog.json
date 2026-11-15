@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.8.5",
+    "date": "2026-11-15",
+    "title": "Kier Mail, at home in Kier",
+    "notes": [
+      "Mail that is in Kier Mail now shows Kier Mail's own mark, the triangle, wherever Kier lists it. That includes mail Kier read from Apple Mail or Spark when the same message is in Kier Mail too.",
+      "Open on such a card goes to that conversation in Kier Mail, with Kier Mail 1.0.6 or later. With an older Kier Mail it opens the app.",
+      "Setup names Kier Mail among the mail apps Kier reads."
+    ],
+    "summary": "Mail that is in Kier Mail shows its triangle and opens the conversation there."
+  },
+  {
     "version": "0.8.4",
     "date": "2026-11-15",
     "title": "Kier has a new name inside your Mac",

@@ -62,14 +62,24 @@ export function owed(db, live, at = now(), minutes = OWED_MINUTES) {
 const sourceFilter = (sources) => `${sources ? `and i.source in (${sources.map((s) => `'${s.replace(/'/g, '')}'`).join(', ')})` : ''} ${offClause()}`
 // Where Reply takes you when a card has no link of its own: the app the conversation lives in.
 const APPS = { whatsapp: 'net.whatsapp.WhatsApp', imessage: 'com.apple.MobileSMS', discord: 'com.hnc.Discord', reminders: 'com.apple.reminders' }
-// Mail read from Sweep opens in Sweep, which has no per-message link Kier can use. Sweep is named rather than given by
-// bundle id; Kier.app finds it in Applications (Card.app).
-const MAIL_APPS = { sweep: 'Sweep' }
+// Mail read from Kier Mail opens in Kier Mail: at the conversation itself when the Kier Mail installed there takes its
+// own links ("sweep://thread/…", as its Copy Link writes them), else just the app. The app is named rather than given
+// by bundle id, since its identifier changed between releases; Kier.app finds it in Applications (Card.app).
+// Mail read from another app that is in Kier Mail as well (the collector notes its thread there) opens the same way.
+const MAIL_APPS = { sweep: 'Kier Mail' }
+const kierMailThread = (m) => String((m.client === 'sweep' ? m.threadId : m.kierMailThread) || '')
+const openLink = (r) => {
+  if (r.url || r.source !== 'mail') return null
+  try {
+    const thread = kierMailThread(JSON.parse(r.meta || '{}'))
+    return thread && thread.length <= 180 ? `sweep://thread/${encodeURIComponent(thread)}` : null
+  } catch { return null }
+}
 const openApp = (r) => {
   if (r.url) return null
   try {
     if (r.source === 'notifications') return JSON.parse(r.meta || '{}').app || null
-    if (r.source === 'mail') return MAIL_APPS[JSON.parse(r.meta || '{}').client] || null
+    if (r.source === 'mail') { const m = JSON.parse(r.meta || '{}'); return MAIL_APPS[m.client] || (kierMailThread(m) ? MAIL_APPS.sweep : null) }
     return APPS[r.source] || null
   } catch { return null }
 }
@@ -159,7 +169,7 @@ export function tasks(db, { days = 14, sources, auth = authorization(sources ?? 
     const maybe = r.source !== 'reminders' && !r.from_me && r.confirmed !== 1 && ((r.second != null && r.second < SECOND.threshold) || r.quiet === 1)
     delete r.reply
     delete r.raw_text
-    return { ...r, from_me: !!r.from_me, state, reason, maybe, open_app: openApp(r), due_time: dueTime(r) }
+    return { ...r, from_me: !!r.from_me, state, reason, maybe, open_app: openApp(r), open_link: openLink(r), due_time: dueTime(r) }
   })
 }
 

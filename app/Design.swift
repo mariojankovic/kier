@@ -127,13 +127,19 @@ struct CardStack<Front: View>: View {
 }
 
 // Where something came from as the app's own mark, in one colour like the symbols beside it: Simple Icons' brand
-// glyphs (simpleicons.org, CC0), plus the official OpenAI app template mark.
+// glyphs (simpleicons.org, CC0), the official OpenAI app template mark, and Kier Mail's own triangle.
 // Calls, the calendar and the web keep their symbol when there is no matching brand.
 enum Brand {
   static func of(source: String, thread: String?, sender: String?, meta: String? = nil, url: String? = nil) -> String? {
     let t = (thread ?? "").lowercased()
     switch source {
     case "whatsapp", "imessage", "discord", "git": return source
+    // Mail that is in Kier Mail carries Kier Mail's mark: read from it, or read from another app and found there too
+    // (the daemon notes its thread). Mail that is nowhere in Kier Mail keeps the envelope.
+    case "mail":
+      let fields = meta.flatMap { $0.data(using: .utf8) }.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+      let noted = fields?["kierMailThread"] as? String ?? ""
+      return fields?["client"] as? String == "sweep" || !noted.isEmpty ? "kiermail" : nil
     case "browser": return url.flatMap(URL.init(string:))?.host?.lowercased() == "chatgpt.com" ? "openai" : nil
     case "social": return t.hasPrefix("threads:") ? "threads" : t.hasPrefix("x:") ? "x" : nil
     case "ai":

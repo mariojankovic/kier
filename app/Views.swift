@@ -43,9 +43,16 @@ extension Card {
   var app: URL? {
     guard let id = open_app else { return nil }
     if id.contains(".") { return NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) }
-    // An app named rather than given by bundle id (Sweep): its copy in Applications.
+    // An app named rather than given by bundle id (Kier Mail): its copy in Applications.
     return [URL(fileURLWithPath: "/Applications"), FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")]
       .map { $0.appendingPathComponent("\(id).app") }.first { FileManager.default.fileExists(atPath: $0.path) }
+  }
+  // The conversation itself in Kier Mail, when the Kier Mail installed here takes its own links; an older one is
+  // just opened as an app (above).
+  var mailLink: URL? {
+    guard let open_link, let url = URL(string: open_link), LinkPolicy.allowsMail(url),
+          NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return nil }
+    return url
   }
   var canReply: Bool { chatURL != nil || app != nil }
   // "Open chat", or the app's name when only the app can be opened ("Open Spark").

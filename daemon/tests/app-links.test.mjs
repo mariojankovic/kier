@@ -40,6 +40,17 @@ precondition(markdown("[x](claude://claude.ai/epitaxy/local_abc)").runs.allSatis
   execFileSync(binary)
 })
 
+test('a conversation in Kier Mail opens only by its own exact link form', () => {
+  const policy = readFileSync(join('../app', 'LinkPolicy.swift'), 'utf8')
+  const shape = policy.match(/static func allowsMail[\s\S]*?#"(\^sweep[^"]+)"#/)?.[1]
+  assert.ok(shape, 'the policy states the one form it lets through')
+  const allowed = new RegExp(shape)
+  assert.ok(allowed.test('sweep://thread/%3Ckite%2Bplans%40example.test%3E'))
+  for (const other of ['sweep://settings', 'sweep://thread/', 'sweep://thread/a b', 'sweep://thread/a/../../b', 'sweep://thread/x?open=1', 'https://example.test/sweep://thread/x', 'file:///etc/hosts']) {
+    assert.ok(!allowed.test(other), other)
+  }
+})
+
 test('all native URL opens and markdown parsing use the central policy', () => {
   for (const name of readdirSync('../app').filter(n => n.endsWith('.swift') && n !== 'LinkPolicy.swift')) {
     const text = readFileSync(join('../app', name), 'utf8')

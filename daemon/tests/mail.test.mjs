@@ -91,11 +91,12 @@ test('detects all three local clients and replaces the mail setup placeholder', 
   const f = fixture(t)
   assert.deepEqual(f.stores.map(s => s.client), ['apple-mail', 'spark', 'sweep'])
   assert.equal(f.stores.find(s => s.client === 'sweep').path, f.sweepPath)
-  // Sweep is read but not named until it's out.
-  assert.match(mailSetup(f.stores, false).detail, /from Apple Mail and Spark\./)
+  // Kier Mail is named like the others, never by the name of the folder it keeps its mail in.
+  assert.match(mailSetup(f.stores, false).detail, /from Apple Mail, Spark and Kier Mail\./)
   assert.doesNotMatch(mailSetup(f.stores, false).detail, /Sweep/)
   assert.equal(mailSetup([f.stores[2]], false).found, true)
-  assert.match(mailSetup([f.stores[2]], false).detail, /from your mail app/)
+  assert.match(mailSetup([f.stores[2]], false).detail, /from Kier Mail\./)
+  assert.match(mailSetup(f.stores.slice(0, 2), false).detail, /from Apple Mail and Spark\./)
   assert.match(mailSetup([], false).detail, /No local/)
   assert.match(mailSetup(f.stores, true).detail, /off/)
 })
@@ -172,6 +173,33 @@ for (const first of ['spark', 'sweep']) test(`Sweep deduplicates the same Messag
   assert.equal(f.db.prepare('select count(*) n from items').get().n, 1)
   f.db.exec('delete from cursors')
   assert.equal(collect(f.db, { stores: f.stores }), 0)
+})
+
+for (const first of ['spark', 'sweep']) test(`mail that is in Spark and in Kier Mail is kept once and knows its Kier Mail thread, whichever is read first (${first})`, t => {
+  const f = fixture(t), id = 'shared-thread@example.test'
+  f.sparkMessage({ id, date: at - 30 })
+  f.sweepMessage({ id, date: at - 30 })
+  collect(f.db, { stores: f.stores.filter(s => s.client === first) })
+  collect(f.db, { stores: f.stores })
+  const kept = f.db.prepare('select meta from items').all().map(r => JSON.parse(r.meta))
+  assert.equal(kept.length, 1)
+  // Read from Kier Mail it carries the thread as its own; read from Spark it is noted with Kier Mail's.
+  assert.equal(kept[0].client === 'sweep' ? kept[0].threadId : kept[0].kierMailThread, 'thread-sketch')
+})
+
+test('mail read from another app before this was known is looked up in Kier Mail once, and noted either way', t => {
+  const f = fixture(t)
+  f.sparkMessage({ id: 'in-both@example.test', date: at - 30 })
+  f.sparkMessage({ id: 'only-spark@example.test', subject: 'Paddle', date: at - 20 })
+  collect(f.db, { stores: f.stores.filter(s => s.client === 'spark') })
+  // Kier Mail has had the first one all along; its own reading is already past it.
+  f.sweepMessage({ id: 'in-both@example.test', date: at - 30 })
+  collect(f.db, { stores: f.stores.filter(s => s.client === 'sweep') })
+  f.db.prepare("update items set meta = json_remove(meta, '$.kierMailThread')").run()
+  collect(f.db, { stores: f.stores.filter(s => s.client === 'sweep') })
+  const note = (mid) => JSON.parse(f.db.prepare("select meta from items where json_extract(meta, '$.messageId') = ?").get(mid).meta).kierMailThread
+  assert.equal(note('in-both@example.test'), 'thread-sketch')
+  assert.equal(note('only-spark@example.test'), '', 'looked for and not there')
 })
 
 test('Sweep deduplication normalizes Message-ID case and differing received/header timestamps', t => {

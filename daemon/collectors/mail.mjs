@@ -33,14 +33,15 @@ export function mailStores(base = home) {
     ...(existsSync(sweep) ? [{ client: 'sweep', path: sweep }] : [])]
 }
 
-// Sweep isn't out yet, so Setup doesn't name it: its mail is read, and the line names only the apps people can get.
+// The line names the mail apps Kier found here. Kier Mail keeps its mail in a folder still called Sweep, its first name.
 export function mailSetup(stores = mailStores(), disabled = isOff(source)) {
   const clients = stores.map(s => s.client)
-  const names = clients.map(c => ({ 'apple-mail': 'Apple Mail', spark: 'Spark' })[c]).filter(Boolean)
-  const from = names.length ? `from ${names.join(' and ')}` : 'from your mail app'
+  const names = clients.map(c => ({ 'apple-mail': 'Apple Mail', spark: 'Spark', sweep: 'Kier Mail' })[c]).filter(Boolean)
+  const listed = names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join(' and ')
+  const from = names.length ? `from ${listed}` : 'from your mail app'
   return { found: clients.length > 0, enabled: clients.length > 0 && !disabled, detail: disabled ? 'Mail is off in What Kier reads.' : clients.length
     ? `Reads personal mail locally ${from}. Bulk mail and attachments stay out.`
-    : 'No local Apple Mail or Spark store found. Open either app and let it download your mail.' }
+    : 'No local Apple Mail, Spark or Kier Mail store found. Open one of them and let it download your mail.' }
 }
 
 // One bounded page of new arrivals, plus one page of the initial backfill. The
@@ -284,11 +285,32 @@ function duplicateSweepCopy(db, item, pending) {
       && Math.abs(item.ts - other.ts) <= 86400 && fingerprint === identity(other)
   }
   if (pending.some(other => normalized(other.meta.messageId) === normalized(item.meta.messageId) && matches(redactValue(other)))) return true
-  const rows = db.prepare(`select from_me, ts, meta from items where ts between ? and ? and source = 'mail' and from_me = ?
+  const rows = db.prepare(`select id, from_me, ts, meta from items where ts between ? and ? and source = 'mail' and from_me = ?
     and json_valid(meta) and lower(trim(json_extract(meta, '$.messageId'), '<> ')) = ?
     and (? = 'sweep' or json_extract(meta, '$.client') = 'sweep') limit ?`)
     .all(item.ts - 86400, item.ts + 86400, Number(item.fromMe), normalized(item.meta.messageId), item.meta.client, PAGE_SIZE)
-  return rows.some(matches)
+  // The kept item this is a copy of, by its id, so a copy found in Kier Mail can be noted on it.
+  return rows.find(matches)?.id || false
+}
+
+// Mail that Kier read from Apple Mail or Spark is very often in Kier Mail too. Such an item is noted with Kier Mail's
+// thread, so its card carries Kier Mail's mark and opens the conversation there. An empty note means it was looked for
+// and is not there (yet): when Kier Mail gets it later, the copy check above notes it.
+const noteThread = (db, id, thread) => db.prepare(`update items set meta = json_set(meta, '$.kierMailThread', ?) where id = ?`).run(String(thread || ''), id)
+function noteKierMail(db, store, at) {
+  let database
+  try {
+    const rows = db.prepare(`select id, json_extract(meta, '$.messageId') mid from items where source = 'mail' and ts > ? and json_valid(meta)
+      and json_extract(meta, '$.client') != 'sweep' and json_extract(meta, '$.messageId') is not null
+      and json_extract(meta, '$.kierMailThread') is null limit ?`).all(at - config.backfillDays * 86400, PAGE_SIZE)
+    if (!rows.length) return
+    database = new DatabaseSync(store.path, { readOnly: true })
+    const find = database.prepare('select thread_id thread from messages where message_id = ? limit 1')
+    for (const r of rows) {
+      const mid = messageID(r.mid) || ''
+      noteThread(db, r.id, mid && (find.get(mid) || find.get(mid.toLowerCase()))?.thread)
+    }
+  } catch {} finally { database?.close() }
 }
 
 export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now() } = {}) {
@@ -298,6 +320,7 @@ export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now
   for (const store of stores) {
     const key = `mail:${store.client}:${hash(store.path).slice(0, 16)}`
     let copy
+    if (store.client === 'sweep') noteKierMail(db, store, at)
     try {
       const previous = cursor(db, key, null)
       const saved = previous ? JSON.parse(previous) : null
@@ -337,7 +360,9 @@ export function collect(db, { stores = mailStores(), limit = PAGE_SIZE, at = now
           text: [String(row.subject || '').slice(0, 500), String(row.snippet || '').slice(0, 2000)].filter(Boolean).join('\n'),
           meta: { subject: String(row.subject || '').slice(0, 500), body: String(row.snippet || '').slice(0, 2000), bodyKind: row.bodyKind || (store.client === 'apple-mail' ? 'plain' : 'preview'), client: store.client, copyKey: `${key}:${row.pk}`, account: row.accountId == null ? key : `${key}:${row.accountId}`, ownerSent: fromMe, messageId: mid, to: row.to, cc: row.cc, mailbox: row.mailbox || '',
             from: row.from, group: row.to.length + row.cc.length > 1, ...(row.accountEmail && { accountEmail: row.accountEmail }), ...(row.threadId && { threadId: row.threadId }), ...(row.conversationPk != null && { conversationPk: row.conversationPk }) } }
-        if (!duplicateSweepCopy(db, item, items)) items.push(item)
+        const twin = duplicateSweepCopy(db, item, items)
+        if (!twin) items.push(item)
+        else if (store.client === 'sweep' && typeof twin === 'string' && row.threadId) noteThread(db, twin, row.threadId)
       }
       added += addItems(db, items)
       setCursor(db, ownerKey, JSON.stringify([...owners]))
