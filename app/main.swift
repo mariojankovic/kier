@@ -247,14 +247,40 @@ final class Eyes {
     + #"|navigation priv[ée]e|navegaci[oó]n privada|navega[cç][aã]o (privada|an[oóô]nima)|navigazione (privata|anonima|in incognito)"#
     + #"|priv[ée]navigatie|priv[ée]modus|priv[ée]venster|anonimno|privatno (pregledavanje|pretra[zž][i]vanje))\b"#
 
+  // The same for every language the two big browser families come in, taken from the browsers' own translations.
+  // Chrome and the browsers built on it put a note after the window's title, in brackets: "(Incognito)", and in German
+  // "(anonym)". The brackets stay in, so a page that is merely about anonymity does not count.
+  private static let chromiumNotes = [
+    "(anonimni način)", "(Anonimno)", "(anonym)", "(Anonymní režim)", "(Gizli mod)", "(Hali fiche)",
+    "(In incognito)", "(Incognito)", "(Incògnit)", "(Incógnito)", "(incógnito)", "(Inkognito režīms)", "(Inkognito)",
+    "(Inkognitó mód)", "(Modo anônimo)", "(Navegação anónima)", "(Navigation privée)", "(Samaran)",
+    "(Ανώνυμη περιήγηση)", "(Анонімний перегляд)", "(без архивирања)", "(инкогнито)", "(Инкогнито)", "(גלישה בסתר)",
+    "(التصفح المتخفي)", "(ناشناس)", "(پوشیدگی)", "(गुप्त)", "(ছদ্মবেশী)", "(છૂપી)", "(மறைநிலை)", "(అజ్ఞాతంగా)",
+    "(ಅದೃಶ್ಯ)", "(ആള്‍മാറാട്ടം)", "(โหมดไม่ระบุตัวตน)", "(ማንነትን የማያሳውቅ)", "(Ẩn danh)", "(無痕模式)", "(시크릿 모드)",
+    "（シークレット モード）", "（无痕）"
+  ]
+  // Safari's own name for the mode.
+  private static let safariNames = [
+    "Anonymné prezeranie", "Anonymní prohlížení", "Duyệt riêng tư", "Navegació privada", "Navegación privada",
+    "Navegação privada", "Navegação Privada", "Navigare privată", "Navigation privée", "Navigazione privata",
+    "Pelayaran Peribadi", "Penelusuran Pribadi", "Privat browser", "Privat nettlesing", "Privat surfning",
+    "Private Browsing", "Privates Surfen", "Privatno pretraživanje", "Privát böngészés", "Privémodus",
+    "Przeglądanie prywatne", "Yksityinen selaus", "Zasebno brskanje", "Özel Dolaşma", "Ιδιωτική περιήγηση",
+    "Приватний перегляд", "Частный доступ", "גלישה פרטית", "تصفح خاص", "गोपनीय ब्राउज़िंग", "ท่องเว็บแบบส่วนตัว",
+    "プライベートブラウズ", "无痕浏览", "私密瀏覽", "개인정보 보호 브라우징"
+  ]
+  private static func saysPrivate(_ s: String) -> Bool {
+    s.range(of: privateWords, options: [.regularExpression, .caseInsensitive]) != nil
+      || (chromiumNotes + safariNames).contains { s.range(of: $0, options: .caseInsensitive) != nil }
+  }
+
   // Browsers say so in their own frame: the window title, the toolbar's profile button. The page itself is
   // skipped, since an article about incognito mode isn't an incognito window.
   private func marked(_ el: AXUIElement, searched: inout Int) -> Bool {
     searched += 1
     guard searched < 800, attribute(el, kAXRoleAttribute) as? String != "AXWebArea" else { return false }
     for attr in [kAXTitleAttribute, kAXDescriptionAttribute, kAXHelpAttribute] {
-      if let s = attribute(el, attr) as? String,
-         s.range(of: Self.privateWords, options: [.regularExpression, .caseInsensitive]) != nil { return true }
+      if let s = attribute(el, attr) as? String, Self.saysPrivate(s) { return true }
     }
     for c in attribute(el, kAXChildrenAttribute) as? [AXUIElement] ?? [] where marked(c, searched: &searched) { return true }
     return false

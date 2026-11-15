@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.8.2",
+    "date": "2026-11-15",
+    "title": "Private windows, in every language",
+    "notes": [
+      "What you copy in a private browser window stays out whatever language your browser is set to. Kier now knows the exact wording Chrome, the browsers built on it and Safari use in each of their languages, taken from the browsers' own translations. That includes German Chrome's \"(anonym)\" and Brazilian Portuguese \"(Modo anônimo)\", which 0.8.1 missed."
+    ],
+    "summary": "Private browser windows are recognised in every language the browsers come in."
+  },
+  {
     "version": "0.8.1",
     "date": "2026-11-15",
     "title": "The same Kier, whatever your language or country",
